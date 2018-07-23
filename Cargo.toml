@@ -1,0 +1,11 @@
+[package]
+name = "stack-alloc"
+version = "0.1.0"
+authors = ["Mark Barbone <mark.l.barbone@gmail.com>"]
+
+[features]
+default = []
+debug_logs = ["libc"]
+
+[dependencies]
+libc = {version = "0.2", optional = true}
