@@ -1,11 +1,4 @@
-//! The user-visible allocator
-//!
-//! ```rust
-//! #![feature(const_fn)]
-//!
-//! #[global_allocator]
-//! static GLOBAL: Allocator<TODO> = Allocator::new()
-//! ```
+//! The `Allocator` type
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ops::Deref;
@@ -35,8 +28,8 @@ impl<T: MemorySource> Allocator<T> {
     ///```rust
     ///extern crate stack_alloc;
     ///use stack_alloc::Allocator;
-    ///#
-    ///#type MyMemorySource = stack_alloc::memory_source::NoMemory;
+    ///
+    ///type MyMemorySource = stack_alloc::memory_source::NoMemory;
     ///
     ///let my_allocator: Allocator<MyMemorySource> = Allocator::new();
     ///```

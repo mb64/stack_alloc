@@ -1,10 +1,10 @@
 [package]
-name = "stack-alloc"
+name = "stack_alloc"
 version = "0.1.0"
 authors = ["Mark Barbone <mark.l.barbone@gmail.com>"]
 
 [features]
-default = []
+default = ["debug_logs"]
 debug_logs = []
 
 [dependencies]

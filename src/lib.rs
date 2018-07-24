@@ -72,8 +72,7 @@ mod factory_chain;
 pub mod memory_source;
 pub mod global_allocator;
 
-#[cfg(test)]
-mod test_memory_source;
+pub mod test_memory_source;
 
 pub use memory_source::MemorySource;
 pub use global_allocator::Allocator;
