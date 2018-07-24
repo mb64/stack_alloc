@@ -43,6 +43,7 @@ pub fn store_metadata(alloc: SizedAllocator) -> &'static SizedAllocator {
     let chunk = unsafe {
         let reserved_place = STACK_HEIGHT;
         STACK_HEIGHT += 1;
+        assert!(STACK_HEIGHT < STACK_SIZE);
         &mut STACK[reserved_place]
     };
     move_into(alloc, chunk)

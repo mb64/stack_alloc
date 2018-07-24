@@ -28,7 +28,7 @@ pub struct FactoryChain<T: MemorySource> {
     small: Cell<Option<&'static SizedAllocator>>,
     /// 64 byte chunk size
     medium: Cell<Option<&'static SizedAllocator>>,
-    /// 16 KiB chunk size
+    /// 4 KiB chunk size
     large: Cell<Option<&'static SizedAllocator>>,
     /// Gives 256 KiB chunks
     source: PhantomData<T>,
@@ -83,12 +83,16 @@ impl<T: MemorySource> FactoryChain<T> {
     /// Returns the owner of the given pointer, or `None` if no allocator claims to own it
     fn owner_of(&self, ptr: *mut u8) -> Option<&'static SizedAllocator> {
         if let Some(small) = self.small.get().filter(|small| small.owns(ptr)) {
+            debug_log!("FactoryChain: small owns pointer %#zx\n\0", ptr);
             Some(small)
         } else if let Some(medium) = self.medium.get().filter(|medium| medium.owns(ptr)) {
+            debug_log!("FactoryChain: medium owns pointer %#zx\n\0", ptr);
             Some(medium)
         } else if let Some(large) = self.large.get().filter(|large| large.owns(ptr)) {
+            debug_log!("FactoryChain: large owns pointer %#zx\n\0", ptr);
             Some(large)
         } else {
+            debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", ptr);
             None
         }
     }
@@ -97,16 +101,19 @@ impl<T: MemorySource> FactoryChain<T> {
 
 unsafe impl<T: MemorySource> GlobalAlloc for FactoryChain<T> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        debug_log!("FactoryChain: delegating allocation (size %zu align %zu) to \0", layout.size(), layout.align());
         match layout.size() {
             0       => ptr::null_mut(),
-            1 ..=49 => {
+            1 ..=47 => {
+                debug_log!("small\n\0");
                 if let Some(small) = self.get_small() {
                     small.alloc(layout)
                 } else {
                     ptr::null_mut()
                 }
             },
-            50..=3_499 => {
+            48..=3_499 => {
+                debug_log!("medium\n\0");
                 if let Some(medium) = self.get_medium() {
                     medium.alloc(layout)
                 } else {
@@ -114,6 +121,7 @@ unsafe impl<T: MemorySource> GlobalAlloc for FactoryChain<T> {
                 }
             },
             3_500..=262_144 => {
+                debug_log!("large\n\0");
                 if let Some(large) = self.get_large() {
                     large.alloc(layout)
                 } else {
@@ -157,6 +165,7 @@ unsafe impl<T: MemorySource> GlobalAlloc for FactoryChain<T> {
                 new_memory,
                 ::core::cmp::min(layout.size(), new_size));
         }
+        self.dealloc(ptr, layout);
         new_memory
     }
 }

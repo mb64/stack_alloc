@@ -5,7 +5,7 @@ authors = ["Mark Barbone <mark.l.barbone@gmail.com>"]
 
 [features]
 default = []
-debug_logs = ["libc"]
+debug_logs = []
 
 [dependencies]
-libc = {version = "0.2", optional = true}
+libc = "0.2"

@@ -3,108 +3,68 @@
 use alloc::alloc::{Layout, GlobalAlloc};
 use core::ptr;
 
-use bitmapped_stack::BitmappedStack;
-use sized_allocator::SizedAllocator;
-use metadata_allocator;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use factory_chain::FactoryChain;
+use memory_source::{MemorySource, BLOCK_SIZE, BLOCK_ALIGN};
 
 /// A simple allocator for testing purposes
 #[derive(Clone, Copy, Debug)]
 pub struct SimpleTestAlloc;
 
-static mut FACTORY_MEMORY: [[[u8; 64]; 64]; 64] = [[[0; 64]; 64]; 64];
+#[derive(Clone, Copy, Debug)]
+pub struct MyGreatMemorySource;
 
-static mut FACTORY: Option<&'static SizedAllocator> = None;
-
-fn get_factory() -> &'static SizedAllocator {
-    unsafe {
-        if let Some(factory) = FACTORY {
-            factory
-        } else {
-            debug_log!("Making the factory\n\0");
-            let factory = {
-                let ptr = {
-                    let ptr: *mut _ = &mut FACTORY_MEMORY;
-                    ptr::NonNull::new_unchecked(ptr as *mut u8)
-                };
-                let stack = BitmappedStack::new(ptr, 64*64);
-                let sized = SizedAllocator::from_stack(stack);
-                metadata_allocator::store_metadata(sized)
-            };
-            FACTORY = Some(factory);
-            factory
-        }
+unsafe impl MemorySource for MyGreatMemorySource {
+    unsafe fn get_block() -> Option<ptr::NonNull<u8>> {
+        debug_log!("MyGreatMemorySource: getting memory from libc::memalign\n\0");
+        let ptr = ::libc::memalign(BLOCK_ALIGN, BLOCK_SIZE);
+        ptr::NonNull::new(ptr).map(ptr::NonNull::cast)
     }
 }
+/*
+static ALLOC: FactoryChain<MyGreatMemorySource> = FactoryChain::new();
+static IN_USE: AtomicBool = AtomicBool::new(false);
 
-static mut THE_ALLOC: Option<&'static SizedAllocator> = None;
-fn get_alloc() -> &'static SizedAllocator {
-    unsafe {
-        if let Some(alloc) = THE_ALLOC {
-            alloc
-        } else {
-            debug_log!("Making the allocator\n\0");
-            let alloc = {
-                let sized = SizedAllocator::from_sized_alloc_factory(get_factory(), 64);
-                metadata_allocator::store_metadata(sized)
-            };
-            THE_ALLOC = Some(alloc);
-            debug_log!("Done making the allocator\n\0");
-            alloc
+struct Lock;
+impl Lock {
+    fn get() -> Lock {
+        let mut spinning = false;
+        while IN_USE.swap(true, Ordering::SeqCst) == true {
+            if !spinning {
+                debug_log!("Spinning...\n\0");
+                spinning = true;
+            }
         }
+        Lock
+    }
+}
+impl Drop for Lock {
+    fn drop(&mut self) {
+        assert!(IN_USE.swap(false, Ordering::SeqCst));
     }
 }
 
 unsafe impl GlobalAlloc for SimpleTestAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        debug_log!("SimpleTestAlloc: allocing size %zu align %zu\n\0", layout.size(), layout.align());
-        let ptr = get_alloc().alloc(layout);
-        debug_log!("SimpleTestAlloc: done allocing size %zu align %zu; the pointer is %#zx\n\n\0", layout.size(), layout.align(), ptr);
+        let _l = Lock::get();
+        debug_log!("SimpleTestAlloc: allocating size %zu align %zu\n\0", layout.size(), layout.align());
+        let ptr = ALLOC.alloc(layout);
+        debug_log!("SimpleTestAlloc: done allocating pointer %#zx\n\n\0", ptr);
         ptr
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        debug_log!("SimpleTestAlloc: deallocing size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr);
-        get_alloc().dealloc(ptr, layout);
-        debug_log!("SimpleTestAlloc: done deallocing size %zu align %zu pointer %#zx\n\n\0", layout.size(), layout.align(), ptr);
+        let _l = Lock::get();
+        debug_log!("SimpleTestAlloc: deallocating size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr);
+        ALLOC.dealloc(ptr, layout);
+        debug_log!("SimpleTestAlloc: done deallocating pointer %#zx\n\n\0", ptr);
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        debug_log!("SimpleTestAlloc: reallocing size %zu to %zu align %zu pointer %#zx\n\0", layout.size(), new_size, layout.align(), ptr);
-        let ptr = get_alloc().realloc(ptr, layout, new_size);
-        debug_log!("SimpleTestAlloc: done reallocing size %zu align %zu; the new pointer is %#zx\n\n\0", layout.size(), layout.align(), ptr);
-        ptr
-    }
-}
-
-/*static mut THE_ALLOCATOR: BitmappedStack = {
-    let ptr = unsafe {
-        let ptr: *mut _ = &mut THE_MEMORY;
-        NonNull::new_unchecked(ptr as *mut u8)
-    };
-    BitmappedStack::new(ptr, 64)
-};
-
-fn to_raw<E>(x: Result<NonNull<u8>, E>) -> *mut u8 {
-    if let Ok(nonnull) = x {
-        nonnull.as_ptr()
-    } else {
-        null_mut()
-    }
-}
-
-unsafe impl GlobalAlloc for SimpleTestAlloc {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        //let mut allocator = THE_ALLOCATOR.lock().unwrap();
-        let allocator = &mut THE_ALLOCATOR;
-        to_raw(allocator.alloc(layout))
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        //let mut allocator = THE_ALLOCATOR.lock().unwrap();
-        let allocator = &mut THE_ALLOCATOR;
-        allocator.dealloc(ptr::NonNull::new(ptr).unwrap(), layout);
-    }
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let allocator = &mut THE_ALLOCATOR;
-        let ptr = NonNull::new(ptr).unwrap();
-        to_raw(allocator.realloc(ptr, layout, new_size))
+        let _l = Lock::get();
+        debug_log!("SimpleTestAlloc: reallocating size %zu to %zu align %zu pointer %#zx\n\0", layout.size(), new_size, layout.align(), ptr);
+        let new_ptr = ALLOC.realloc(ptr, layout, new_size);
+        debug_log!("SimpleTestAlloc: done reallocating pointer %#zx to new pointer %#zx\n\n\0", ptr, new_ptr);
+        new_ptr
     }
 }
 */

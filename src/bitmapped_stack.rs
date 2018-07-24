@@ -158,9 +158,10 @@ impl BitmappedStack {
 
     /// Lowers the height past as many deallocated chunks as possible
     fn shrink_height(&mut self) {
-        while self.current_height > 0 && !self.is_chunk_allocated(self.current_height - 1) {
-            self.current_height -= 1;
-        }
+        self.current_height = 64 - self.bitmap.leading_zeros() as usize;
+        // while self.current_height > 0 && !self.is_chunk_allocated(self.current_height - 1) {
+            // self.current_height -= 1;
+        // }
     }
 
     fn to_excess(&self, layout: Layout, ptr: NonNull<u8>) -> alloc::Excess {
@@ -196,6 +197,7 @@ unsafe impl Alloc for BitmappedStack {
 
     unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
         debug_log!("Freeing: align %zu, size %zu\n\0", layout.align(), layout.size());
+        debug_assert!(self.owns(ptr.as_ptr()));
         let start_chunk = self.ptr_to_chunk(ptr.as_ptr());
         let end_chunk = start_chunk + self.chunks_for(layout.size());
         self.bitmap_deallocate(start_chunk..end_chunk);
@@ -246,6 +248,9 @@ unsafe impl Alloc for BitmappedStack {
         if old_end == new_end {
             debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
             return Ok(());
+        }
+        if new_end > STACK_SIZE {
+            return Err(alloc::CannotReallocInPlace);
         }
         debug_assert!(old_end < new_end);
         if old_end == self.current_height {

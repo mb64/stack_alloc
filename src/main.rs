@@ -16,20 +16,23 @@
 
 extern crate core;
 extern crate alloc;
-#[cfg(feature = "debug_logs")]
 extern crate libc;
 
 #[macro_use]
 mod macros;
-pub mod bitmapped_stack;
-pub mod sized_allocator;
-pub mod metadata_allocator;
+mod bitmapped_stack;
+mod sized_allocator;
+mod metadata_allocator;
 pub mod global;
-pub mod bucketed_alloc;
+mod factory_chain;
 pub mod memory_source;
+pub mod global_allocator;
+
+pub use memory_source::MemorySource;
+pub use global_allocator::Allocator;
 
 #[global_allocator]
-static GLOBAL: global::SimpleTestAlloc = global::SimpleTestAlloc;
+static GLOBAL: Allocator<global::MyGreatMemorySource> = Allocator::new();
 
 fn main() {
     let _v0: Vec<u8> = Vec::with_capacity(4096);
