@@ -14,7 +14,15 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use factory_chain::FactoryChain;
 use memory_source::MemorySource;
 
-// TODO Docs
+/// The `Allocator` type is the way to set up a global allocator.  It implements the
+/// `std::alloc::GlobalAlloc` trait, allowing it to be used as the allocator.
+///
+/// For how to use it in your program, see the crate docs.  For how it works, see the `README.md`
+/// file.
+///
+/// See the [`std`
+/// docs](https://doc.rust-lang.org/nightly/std/alloc/index.html#the-global_allocator-attribute)
+/// for more information on global allocators.
 #[derive(Debug)]
 pub struct Allocator<T: MemorySource> {
     alloc: FactoryChain<T>,
@@ -22,6 +30,16 @@ pub struct Allocator<T: MemorySource> {
 }
 
 impl<T: MemorySource> Allocator<T> {
+    /// Creates a new `Allocator<T>` that uses the memory source `T`.
+    ///
+    ///```rust
+    ///extern crate stack_alloc;
+    ///use stack_alloc::Allocator;
+    ///#
+    ///#type MyMemorySource = stack_alloc::memory_source::NoMemory;
+    ///
+    ///let my_allocator: Allocator<MyMemorySource> = Allocator::new();
+    ///```
     pub const fn new() -> Self {
         Allocator {
             alloc: FactoryChain::new(),
