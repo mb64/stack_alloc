@@ -16,7 +16,7 @@ pub enum Factory {
     /// The factory is another, bigger, `SizedAllocator`
     SizedAlloc(&'static SizedAllocator),
     /// The factory is a MemorySource whose allocation function is this one
-    MemorySource(fn() -> Option<ptr::NonNull<u8>>),
+    MemorySource(unsafe fn() -> Option<ptr::NonNull<u8>>),
     /// There is no factory
     None,
 }
@@ -59,13 +59,12 @@ impl SizedAllocator {
     /// Makes a new `SizedAllocator` that uses the `MemorySource` as its factory
     pub fn from_memory_source<T: MemorySource>(chunk_size: usize) -> Option<Self> {
         let func = T::get_block;
-
         Self::from_memory_source_func(func, chunk_size)
     }
 
-    fn from_memory_source_func(func: fn() -> Option<ptr::NonNull<u8>>, chunk_size: usize) -> Option<Self> {
+    fn from_memory_source_func(func: unsafe fn() -> Option<ptr::NonNull<u8>>, chunk_size: usize) -> Option<Self> {
         debug_assert_eq!(chunk_size * 64, memory_source::BLOCK_SIZE);
-        let memory = func()?;
+        let memory = unsafe { func()? };
         Some(Self::from_backup(
             BackupAllocator {
                 primary: BitmappedStack::new(memory, chunk_size),

@@ -33,7 +33,7 @@ pub const BLOCK_ALIGN: usize = 4096;
 ///
 /// For example, in web assembly, the way to get memory is different from on Linux, and in a
 /// bare-metal situation you'd have to make your own stack or something.
-pub trait MemorySource {
+pub unsafe trait MemorySource {
     /// Potentially returns a block of memory.
     ///
     /// This memory needs to fulfill layout requirements:
@@ -42,20 +42,20 @@ pub trait MemorySource {
     ///
     /// If it returns `Some(thing)`, then ownership of the block of memory pointed to by `thing` is
     /// transferred to the caller.
-    fn get_block() -> Option<NonNull<u8>>;
+    unsafe fn get_block() -> Option<NonNull<u8>>;
 }
 
 /// A memory source that is never successful in returning memory.
 ///
-/// If you use it, you won't have any memory.  Even simple things that need allocation, 
+/// If you use it, you won't have any memory.  Even simple things that need allocation,
 /// `println!()` for example, won't work.  (`println!` allocates an output buffer.)
 ///
 /// `NoMemory` is the unit source with respect to `Fallback`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NoMemory;
 
-impl MemorySource for NoMemory {
-    fn get_block() -> Option<NonNull<u8>> {
+unsafe impl MemorySource for NoMemory {
+    unsafe fn get_block() -> Option<NonNull<u8>> {
         None
     }
 }
@@ -67,11 +67,11 @@ pub struct Fallback<T, U> {
     _data: PhantomData<(T, U)>,
 }
 
-impl<T, U> MemorySource for Fallback<T, U> 
+unsafe impl<T, U> MemorySource for Fallback<T, U>
     where T: MemorySource,
           U: MemorySource
 {
-    fn get_block() -> Option<NonNull<u8>> {
+    unsafe fn get_block() -> Option<NonNull<u8>> {
         T::get_block().or_else(|| U::get_block())
     }
 }
