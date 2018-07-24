@@ -4,8 +4,11 @@ version = "0.1.0"
 authors = ["Mark Barbone <mark.l.barbone@gmail.com>"]
 
 [features]
-default = ["debug_logs"]
+default = []
 debug_logs = []
 
 [dependencies]
 libc = "0.2"
+
+[lib]
+doctest = false
