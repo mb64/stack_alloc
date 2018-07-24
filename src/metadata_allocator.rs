@@ -39,7 +39,7 @@ static mut STACK: [Chunk; STACK_SIZE] = [Chunk::new(); 64];
 static mut STACK_HEIGHT: usize = 0;
 
 /// Stores the metadata in the metadata stack.
-pub fn store_metadata(alloc: SizedAllocator) -> &'static SizedAllocator {
+pub fn store_metadata(alloc: SizedAllocator) -> &'static mut SizedAllocator {
     let chunk = unsafe {
         let reserved_place = STACK_HEIGHT;
         STACK_HEIGHT += 1;

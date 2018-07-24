@@ -1,6 +1,6 @@
 //! The `Allocator` type
 
-use core::alloc::{GlobalAlloc, Layout};
+use core::alloc::{Alloc, GlobalAlloc, Layout};
 use core::cell;
 use core::ops;
 use core::ptr;
@@ -84,10 +84,10 @@ impl<T: MemorySource> Allocator<T> {
     }
 }
 
-fn to_raw(ptr: Option<ptr::NonNull<u8>>) -> *mut u8 {
+fn to_raw<E>(ptr: Result<ptr::NonNull<u8>, E>) -> *mut u8 {
     match ptr {
-        Some(nonnull) => nonnull.as_ptr(),
-        None => ptr::null_mut(),
+        Ok(nonnull) => nonnull.as_ptr(),
+        _ => ptr::null_mut(),
     }
 }
 
