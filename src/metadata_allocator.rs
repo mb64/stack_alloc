@@ -47,5 +47,3 @@ pub fn store_metadata(alloc: SizedAllocator) -> &'static SizedAllocator {
     };
     move_into(alloc, chunk)
 }
-
-

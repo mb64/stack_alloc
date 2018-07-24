@@ -1,11 +1,13 @@
 //! A simple-ish allocator
-//! It's very not done
+//!
+//! It's not done
 
 //#![no_std]
 #![feature(alloc)]
 #![feature(allocator_api)]
 #![feature(ptr_offset_from)]
 #![feature(const_fn, const_let)]
+#![feature(cell_update)]
 
 #![warn(missing_docs,
         missing_debug_implementations,
@@ -23,6 +25,8 @@ pub mod bitmapped_stack;
 pub mod sized_allocator;
 pub mod metadata_allocator;
 pub mod global;
+pub mod bucketed_alloc;
+pub mod memory_source;
 
 #[global_allocator]
 static GLOBAL: global::SimpleTestAlloc = global::SimpleTestAlloc;

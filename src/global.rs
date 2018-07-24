@@ -44,7 +44,7 @@ fn get_alloc() -> &'static SizedAllocator {
         } else {
             debug_log!("Making the allocator\n\0");
             let alloc = {
-                let sized = SizedAllocator::from_factory(get_factory(), 64);
+                let sized = SizedAllocator::from_sized_alloc_factory(get_factory(), 64);
                 metadata_allocator::store_metadata(sized)
             };
             THE_ALLOC = Some(alloc);

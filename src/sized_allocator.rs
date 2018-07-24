@@ -7,7 +7,19 @@ use core::cell;
 use core::ptr;
 
 use bitmapped_stack::{BitmappedStack, STACK_SIZE};
+use memory_source::{self, MemorySource};
 use metadata_allocator;
+
+/// A `SizedAllocator` gets new memory from a `Factory`.
+#[derive(Debug)]
+pub enum Factory {
+    /// The factory is another, bigger, `SizedAllocator`
+    SizedAlloc(&'static SizedAllocator),
+    /// The factory is a MemorySource whose allocation function is this one
+    MemorySource(fn() -> Option<ptr::NonNull<u8>>),
+    /// There is no factory
+    None,
+}
 
 /// The `SizedAllocator` type is the type that implements `GlobalAlloc`
 ///
@@ -25,7 +37,7 @@ impl SizedAllocator {
     /// the given chunk size
     /// 
     /// It panics if it can't allocate memory from the factory
-    pub fn from_factory(factory: &'static SizedAllocator, chunk_size: usize) -> Self {
+    pub fn from_sized_alloc_factory(factory: &'static SizedAllocator, chunk_size: usize) -> Self {
         let memory = {
             let size = STACK_SIZE * chunk_size;
             let align = chunk_size;
@@ -40,8 +52,26 @@ impl SizedAllocator {
             BackupAllocator {
                 primary: BitmappedStack::new(memory, chunk_size),
                 backup: None,
-                factory: Some(factory),
+                factory: Factory::SizedAlloc(factory),
             })
+    }
+
+    /// Makes a new `SizedAllocator` that uses the `MemorySource` as its factory
+    pub fn from_memory_source<T: MemorySource>(chunk_size: usize) -> Option<Self> {
+        let func = T::get_block;
+
+        Self::from_memory_source_func(func, chunk_size)
+    }
+
+    fn from_memory_source_func(func: fn() -> Option<ptr::NonNull<u8>>, chunk_size: usize) -> Option<Self> {
+        debug_assert_eq!(chunk_size * 64, memory_source::BLOCK_SIZE);
+        let memory = func()?;
+        Some(Self::from_backup(
+            BackupAllocator {
+                primary: BitmappedStack::new(memory, chunk_size),
+                backup: None,
+                factory: Factory::MemorySource(func),
+            }))
     }
 
     /// Makes a new `SizedAllocator` that uses the given stack
@@ -50,7 +80,7 @@ impl SizedAllocator {
             BackupAllocator {
                 primary: stack,
                 backup: None,
-                factory: None,
+                factory: Factory::None,
             })
     }
 
@@ -66,17 +96,22 @@ impl SizedAllocator {
         self.cell.borrow().chunk_size()
     }
 
+    /// Returns whether or not the pointer is within memory owned by the allocator
+    pub fn owns(&self, ptr: *const u8) -> bool {
+        self.cell.borrow().owns(ptr)
+    }
+
     /// Tries to shrink the given memory.
     ///
     /// Performs the same operation as `core::alloc::Alloc::shrink_in_place`
-    unsafe fn shrink_in_place(&self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn shrink_in_place(&self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
         self.cell.borrow_mut().shrink_in_place(ptr, layout, new_size)
     }
 
     /// Tries to grow the given memory.
     ///
     /// Performs the same operation as `core::alloc::Alloc::grow_in_place`
-    unsafe fn grow_in_place(&self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn grow_in_place(&self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
         self.cell.borrow_mut().grow_in_place(ptr, layout, new_size)
     }
 }
@@ -116,7 +151,7 @@ struct BackupAllocator {
     /// The backup allocator should have the same size chunk as the primary allocator
     backup: Option<&'static SizedAllocator>,
     /// The factory's chunk size will be enough to fit an entire block of 
-    factory: Option<&'static SizedAllocator>,
+    factory: Factory,
 }
 
 impl BackupAllocator {
@@ -139,12 +174,31 @@ impl BackupAllocator {
         debug_log!("Using backup allocator\n\0");
         if let alloc@Some(_) = self.backup {
             alloc
-        } else if let Some(factory) = self.factory {
-            let new_allocator = SizedAllocator::from_factory(factory, self.chunk_size());
-            self.backup = Some(metadata_allocator::store_metadata(new_allocator));
-            self.backup
         } else {
-            None
+            match self.factory {
+                Factory::SizedAlloc(sized_alloc) => {
+                    let new_allocator = SizedAllocator::from_sized_alloc_factory(sized_alloc, self.chunk_size());
+                    self.backup = Some(metadata_allocator::store_metadata(new_allocator));
+                    self.backup
+                },
+                Factory::MemorySource(func) => {
+                    let new_allocator = SizedAllocator::from_memory_source_func(func, self.chunk_size())?;
+                    self.backup = Some(metadata_allocator::store_metadata(new_allocator));
+                    self.backup
+                },
+                Factory::None => None,
+            }
+        }
+    }
+
+    /// Returns `true` if the pointer is within memory owned by the allocator
+    fn owns(&self, ptr: *const u8) -> bool {
+        if self.primary.owns(ptr) {
+            true
+        } else if let Some(backup) = self.backup {
+            backup.owns(ptr)
+        } else {
+            false
         }
     }
 }
