@@ -74,13 +74,6 @@ impl<T: MemorySource> FactoryChain<T> {
     }
 
     unsafe fn get_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
-        /*if self.large.is_none() {
-            let memory = T::get_block().ok_or(alloc::AllocErr)?;
-            let large_alloc = SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, memory, None);
-            self.large = self.store_metadata(large_alloc).ok();
-        }
-        self.large_mut().ok_or(alloc::AllocErr)
-        */
         if self.large.is_none() {
             self.extend_large()
         } else {
@@ -88,17 +81,6 @@ impl<T: MemorySource> FactoryChain<T> {
         }
     }
     unsafe fn get_medium(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
-        /*
-        if self.medium.is_none() {
-            let medium_alloc = {
-                let layout = Layout::from_size_align_unchecked(MEDIUM_CHUNK_SIZE*STACK_SIZE, MEDIUM_CHUNK_SIZE);
-                let memory = self.alloc_large(layout)?;
-                SizedAllocator::from_memory_chunk(MEDIUM_CHUNK_SIZE, memory, None)
-            };
-            self.medium = self.store_metadata(medium_alloc).ok();
-        }
-        self.medium_mut().ok_or(alloc::AllocErr)
-        */
         if self.medium.is_none() {
             self.extend_medium()
         } else {
@@ -106,18 +88,6 @@ impl<T: MemorySource> FactoryChain<T> {
         }
     }
     unsafe fn get_metadata(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
-        /*
-        if self.metadata.is_none() {
-            let metadata_alloc = {
-                let layout = Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE);
-                let memory = self.alloc_large(layout)?;
-                SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, memory, None)
-            };
-            // FIXME store it in itself
-            self.metadata = self.store_metadata(metadata_alloc).ok();
-        }
-        self.metadata_mut().ok_or(alloc::AllocErr)
-        */
         if self.metadata.is_none() {
             self.extend_metadata()
         } else {
@@ -125,16 +95,6 @@ impl<T: MemorySource> FactoryChain<T> {
         }
     }
     unsafe fn get_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
-        /*if self.small.is_none() {
-            let small_alloc = {
-                let layout = Layout::from_size_align_unchecked(SMALL_CHUNK_SIZE*STACK_SIZE, SMALL_CHUNK_SIZE);
-                let memory = self.alloc_medium(layout)?;
-                SizedAllocator::from_memory_chunk(SMALL_CHUNK_SIZE, memory, None)
-            };
-            self.small = self.store_metadata(small_alloc).ok();
-        }
-        self.small_mut().ok_or(alloc::AllocErr)
-        */
         if self.small.is_none() {
             self.extend_small()
         } else {
@@ -214,7 +174,13 @@ impl<T: MemorySource> FactoryChain<T> {
         let alloc_box = {
             let memory = T::get_block().ok_or(alloc::AllocErr)?;
             let old_large = self.large.take();
-            let new_alloc = SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, memory, old_large);
+            let mut new_alloc = SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, memory, old_large);
+            if self.metadata.is_none() {
+                let metadata_memory = new_alloc.alloc(Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE))?;
+                let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, None);
+                let mem_for_metadata = metadata_alloc.alloc(Layout::new::<SizedAllocator>())?;
+                self.metadata = Some(MetadataBox::from_pointer_data(mem_for_metadata, metadata_alloc));
+            }
             self.store_metadata(new_alloc)?
         };
         self.large = Some(alloc_box);
@@ -333,22 +299,20 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
             };
             let stack_ptr = allocator.stack_pointer();
             self.dealloc(stack_ptr, stack_layout);
-            // FIXME this doesn't free the metadata
+            self.metadata.as_mut().unwrap().dealloc(allocator.into_raw().cast(), Layout::new::<SizedAllocator>());
         }
     }
 
     unsafe fn realloc(&mut self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
         let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
 
-        {
-            let alloc = self.owner_of(ptr).expect("No allocator claims to own the memory");
-            if new_size <= layout.size() {
-                alloc.shrink_in_place(ptr, layout, new_size);
+        let alloc = self.owner_of(ptr).expect("No allocator claims to own the memory");
+        if new_size <= layout.size() {
+            alloc.shrink_in_place(ptr, layout, new_size);
+            return Ok(ptr);
+        } else {
+            if alloc.grow_in_place(ptr, layout, new_size).is_ok() {
                 return Ok(ptr);
-            } else {
-                if alloc.grow_in_place(ptr, layout, new_size).is_ok() {
-                    return Ok(ptr);
-                }
             }
         }
 

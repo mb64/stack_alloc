@@ -31,13 +31,6 @@ impl<T> ops::DerefMut for MetadataBox<T> {
 }
 
 impl<T> MetadataBox<T> {
-    /// Creates a new `MetadataBox` from the raw pointer.
-    ///
-    /// It is unsafe because it assumes the pointer is a valid pointer to the right type.
-    pub const unsafe fn from_raw(ptr: ptr::NonNull<T>) -> Self {
-        Self { ptr }
-    }
-
     /// Create a `MetadataBox` from the pointer to uninitialized memory and the value.
     ///
     /// It's unsafe because it assumes the pointer is a valid pointer for the type, and that it
@@ -45,6 +38,18 @@ impl<T> MetadataBox<T> {
     pub unsafe fn from_pointer_data(ptr: ptr::NonNull<u8>, data: T) -> Self {
         let ptr: ptr::NonNull<T> = ptr.cast();
         ptr.as_ptr().write(data);
+        Self::from_raw(ptr)
+    }
+
+    /// Creates a new `MetadataBox` from the raw pointer.
+    ///
+    /// It is unsafe because it assumes the pointer is a valid pointer to the right type.
+    pub const unsafe fn from_raw(ptr: ptr::NonNull<T>) -> Self {
         Self { ptr }
+    }
+
+    /// Returns a pointer to the data in the box.
+    pub fn into_raw(self) -> ptr::NonNull<T> {
+        self.ptr
     }
 }
