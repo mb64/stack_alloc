@@ -51,85 +51,19 @@ impl SizedAllocator {
             })
     }
 
-    /*/// Tries to shrink the given memory.
-    ///
-    /// Performs the same operation as `core::alloc::Alloc::shrink_in_place`
-    pub unsafe fn shrink_in_place(&self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
-        self.cell.borrow_mut().shrink_in_place(ptr, layout, new_size)
-    }
-
-    /// Tries to grow the given memory.
-    ///
-    /// Performs the same operation as `core::alloc::Alloc::grow_in_place`
-    pub unsafe fn grow_in_place(&self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
-        self.cell.borrow_mut().grow_in_place(ptr, layout, new_size)
-    }
-
-    /// Tries to allocate memory of the given layout.
-    pub unsafe fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
-        debug_log!("SizedAllocator: allocing size %zu\n\0", layout.size());
-        self.cell.borrow_mut().alloc(layout).ok()
-    }
-
-    /// Deallocates the memory
-    pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
-        debug_log!("SizedAllocator: deallocing size %zu\n\0", layout.size());
-        self.cell.borrow_mut().dealloc(ptr, layout);
-    }*/
-
-    /*pub unsafe fn realloc(&self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Option<NonNull<u8>> {
-        debug_log!("SizedAllocator: reallocing size %zu pointer %#zx\n\0", layout.size(), ptr);
-        self.cell.borrow_mut().realloc(ptr, layout, new_size).ok()
-    }*/
-//}
-
-/*/// An allocator with a potential backup for allocation failures.
-/// It allocates new `SizedAllocator`s as necessary.
-#[derive(Debug)]
-struct BackupAllocator {
-    primary: BitmappedStack,
-    /// The backup allocator should have the same size chunk as the primary allocator
-    backup: Option<&'static SizedAllocator>,
-    // /// The factory's chunk size will be enough to fit an entire block of
-    // factory: Factory,
-}*/
-
-//impl BackupAllocator {
     /// Returns the smallest size allocation possible
     fn chunk_size(&self) -> usize {
         let size = self.primary.chunk_size();
 
-        /*#[cfg(debug_asserts)]
+        #[cfg(debug_asserts)]
         {
             if let Some(backup) = self.backup {
                 debug_assert_eq!(size, backup.chunk_size());
             }
-        }*/
+        }
 
         size
     }
-
-    /*/// Returns the backup allocator, making a new one with memory from the factory if necessary
-    fn get_backup(&mut self) -> Option<&'static SizedAllocator> {
-        debug_log!("Using backup allocator\n\0");
-        if let alloc@Some(_) = self.backup {
-            alloc
-        } else {
-            match self.factory {
-                Factory::SizedAlloc(sized_alloc) => {
-                    let new_allocator = SizedAllocator::from_sized_alloc_factory(sized_alloc, self.chunk_size());
-                    self.backup = Some(metadata_allocator::store_metadata(new_allocator));
-                    self.backup
-                },
-                Factory::MemorySource(func) => {
-                    let new_allocator = SizedAllocator::from_memory_source_func(func, self.chunk_size())?;
-                    self.backup = Some(metadata_allocator::store_metadata(new_allocator));
-                    self.backup
-                },
-                Factory::None => None,
-            }
-        }
-    }*/
 
     /// Returns `true` if the pointer is within memory owned by the allocator
     pub fn owns(&self, ptr: *const u8) -> bool {
@@ -196,4 +130,3 @@ unsafe impl Alloc for SizedAllocator {
         }
     }
 }
-
