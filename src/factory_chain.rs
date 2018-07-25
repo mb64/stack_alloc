@@ -21,6 +21,25 @@ const LARGE_CHUNK_SIZE: usize = 4096;
 
 const METADATA_CHUNK_SIZE: usize = 64;
 
+/// What size allocator an allocation belongs to
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
+enum SizeCategory {
+    Small,
+    Medium,
+    Large,
+}
+impl SizeCategory {
+    fn choose(size: usize) -> Option<Self> {
+        match size {
+            0 => None,
+            1..=47 => Some(SizeCategory::Small),
+            48..=3499 => Some(SizeCategory::Medium),
+            3500..=262144 => Some(SizeCategory::Large),
+            _ => None,
+        }
+    }
+}
+
 /// The `FactoryChain` buckets allocations into small (size < 64 bytes), medium (64 bytes < size <
 /// 4 KiB) and large (4 KiB < size).
 ///
@@ -103,9 +122,27 @@ impl<T: MemorySource> FactoryChain<T> {
     }
 
     /// Returns the owner of the given pointer, or `None` if no allocator claims to own it
-    fn owner_of(&mut self, ptr: ptr::NonNull<u8>) -> Option<&mut SizedAllocator> {
-        // TODO size checks first
-        let raw_ptr = ptr.as_ptr();
+    fn owner_of(&mut self, ptr: ptr::NonNull<u8>, layout: Layout) -> Option<&mut SizedAllocator> {
+        let _raw_ptr = ptr.as_ptr();
+        match SizeCategory::choose(layout.size()) {
+            Some(SizeCategory::Small) => {
+                debug_log!("FactoryChain: small owns pointer %#zx\n\0", _raw_ptr);
+                self.small_mut()
+            },
+            Some(SizeCategory::Medium) => {
+                debug_log!("FactoryChain: medium owns pointer %#zx\n\0", _raw_ptr);
+                self.medium_mut()
+            },
+            Some(SizeCategory::Large) => {
+                debug_log!("FactoryChain: large owns pointer %#zx\n\0", _raw_ptr);
+                self.large_mut()
+            },
+            None => {
+                debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", _raw_ptr);
+                None
+            },
+        }
+        /*
         if let Some(small) = self.small.as_mut().filter(|small| small.owns(raw_ptr)) {
             debug_log!("FactoryChain: small owns pointer %#zx\n\0", raw_ptr);
             Some(small)
@@ -119,6 +156,7 @@ impl<T: MemorySource> FactoryChain<T> {
             debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", raw_ptr);
             None
         }
+        */
     }
 
     // FIXME (unimportant) these discard the entire chain of allocators on some failures
@@ -220,6 +258,16 @@ impl<T: MemorySource> FactoryChain<T> {
         }
     }
 
+    /// Tries to allocate from the chain that corresponds to the size category, extending it if
+    /// neccessary
+    unsafe fn alloc_size(&mut self, layout: Layout, size_category: SizeCategory) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
+        match size_category {
+            SizeCategory::Small => self.alloc_small(layout),
+            SizeCategory::Medium => self.alloc_medium(layout),
+            SizeCategory::Large => self.alloc_large(layout),
+        }
+    }
+
     /// Tries to allocate from the `large` chain, extending it if necessary, but doesn't store away
     /// any extra metadata created
     unsafe fn alloc_large_no_metadata(&mut self, layout: Layout) -> Result<(ptr::NonNull<u8>, Option<SizedAllocator>), alloc::AllocErr> {
@@ -267,8 +315,8 @@ impl<T: MemorySource> FactoryChain<T> {
 
 unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
     unsafe fn alloc(&mut self, layout: Layout) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
-        debug_log!("FactoryChain: delegating allocation (size %zu align %zu) to \0", layout.size(), layout.align());
-        match layout.size() {
+        debug_log!("FactoryChain: allocating size %zu align %zu\n\0", layout.size(), layout.align());
+        /*match layout.size() {
             0       => Err(alloc::AllocErr),
             1 ..=47 => {
                 debug_log!("small\n\0");
@@ -283,6 +331,11 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
                 self.alloc_large(layout)
             },
             _ => Err(alloc::AllocErr),
+        }*/
+        if let Some(category) = SizeCategory::choose(layout.size()) {
+            self.alloc_size(layout, category)
+        } else {
+            Err(alloc::AllocErr)
         }
     }
 
@@ -290,7 +343,7 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
         if layout.size() == 0 {
             return;
         }
-        let owner = self.owner_of(ptr).expect("No allocator owns the memory to deallocate");
+        let owner = self.owner_of(ptr, layout).expect("No allocator owns the memory to deallocate");
         if let DeallocResponse::FreeAllocator(allocator) = owner.dealloc(ptr, layout) {
             let stack_layout = {
                 let size = allocator.chunk_size() * STACK_SIZE;
@@ -306,13 +359,16 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
     unsafe fn realloc(&mut self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
         let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
 
-        let alloc = self.owner_of(ptr).expect("No allocator claims to own the memory");
-        if new_size <= layout.size() {
-            alloc.shrink_in_place(ptr, layout, new_size);
-            return Ok(ptr);
-        } else {
-            if alloc.grow_in_place(ptr, layout, new_size).is_ok() {
+        // Try to expand it in place if the size category hasn't changed
+        if SizeCategory::choose(layout.size()) == SizeCategory::choose(new_size) {
+            let alloc = self.owner_of(ptr, layout).expect("No allocator owns the memory to realloc");
+            if new_size <= layout.size() {
+                alloc.shrink_in_place(ptr, layout, new_size);
                 return Ok(ptr);
+            } else {
+                if alloc.grow_in_place(ptr, layout, new_size).is_ok() {
+                    return Ok(ptr);
+                }
             }
         }
 
