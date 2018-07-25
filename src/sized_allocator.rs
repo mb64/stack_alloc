@@ -3,8 +3,8 @@
 use core::alloc::{self, Layout};
 use core::ptr::NonNull;
 
-use bitmapped_stack::{BitmappedStack, STACK_SIZE};
-use memory_source::{self, MemorySource};
+use bitmapped_stack::BitmappedStack;
+use metadata_box::MetadataBox;
 
 /// The recommended action after deallocating
 pub enum DeallocResponse {
@@ -20,50 +20,31 @@ pub enum DeallocResponse {
     ///
     /// This happens when another allocator down the line was collapsed and its memory needs to be
     /// freed.
-    FreeAllocator(&'static mut SizedAllocator),
+    FreeAllocator(MetadataBox<SizedAllocator>),
 }
 
-/// The `SizedAllocator` type is the type that implements `GlobalAlloc`
-///
-/// It uses internal mutability to make it work
-///
 /// A `SizedAllocator` is a linked list of stacks whose chunk size is the same.
 #[derive(Debug)]
 pub struct SizedAllocator {
     primary: BitmappedStack,
     /// The backup allocator should have the same size chunk as the primary allocator
-    backup: Option<&'static mut SizedAllocator>,
+    backup: Option<MetadataBox<SizedAllocator>>,
 }
 
 impl SizedAllocator {
-    /// Allocates memory from the factory and creates a new `SizedAllocator` using the given chunk
-    /// size.
+    /// Create a new `SizedAllocator` from the given chunk of memory
     ///
-    /// It panics if it can't allocate memory from the factory
-    pub unsafe fn from_sized_alloc_factory(chunk_size: usize, factory: &mut SizedAllocator, backup: Option<&'static mut SizedAllocator>) -> Option<Self> {
-        let memory = {
-            let size = STACK_SIZE * chunk_size;
-            let align = chunk_size;
-            debug_assert_eq!(size, factory.chunk_size());
-            factory.alloc(Layout::from_size_align(size, align).unwrap()).ok()?
-        };
-
-        Some(
-            SizedAllocator {
-                primary: BitmappedStack::new(memory, chunk_size),
-                backup: backup,
-            })
-    }
-
-    /// Makes a new `SizedAllocator` that uses the `MemorySource` as its factory
-    pub unsafe fn from_memory_source<T: MemorySource>(chunk_size: usize, backup: Option<&'static mut SizedAllocator>) -> Option<Self> {
-        debug_assert_eq!(chunk_size * 64, memory_source::BLOCK_SIZE);
-        let memory = T::get_block()?;
-        Some(
-            SizedAllocator {
-                primary: BitmappedStack::new(memory, chunk_size),
-                backup: backup,
-            })
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    ///  * The chunk size is a power of 2
+    ///  * The memory is a valid pointer with alignment `chunk_size` and size `STACK_SIZE *
+    ///  chunk_size`
+    pub unsafe fn from_memory_chunk(chunk_size: usize, memory: NonNull<u8>, backup: Option<MetadataBox<SizedAllocator>>) -> Self {
+        SizedAllocator {
+            primary: BitmappedStack::new(memory, chunk_size),
+            backup: backup,
+        }
     }
 
     /// Returns the smallest size allocation possible
@@ -116,7 +97,7 @@ impl SizedAllocator {
             } else {
                 DeallocResponse::Nothing
             }
-        } else if let Some(backup) = self.backup.take() {
+        } else if let Some(mut backup) = self.backup.take() {
             debug_log!("    (Primary does not own it)\n\0");
             match backup.dealloc(ptr, layout) {
                 DeallocResponse::Collapse => {

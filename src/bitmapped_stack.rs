@@ -243,7 +243,7 @@ impl BitmappedStack {
             debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
             Ok(())
         } else {
-            if (old_end..new_end).all(|chunk| !self.is_chunk_allocated(chunk)) {
+            if self.all_deallocated(old_end..new_end) {
                 self.bitmap_allocate(old_end..new_end);
                 debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
                 Ok(())

@@ -67,8 +67,9 @@ extern crate libc;
 #[macro_use]
 mod macros;
 mod bitmapped_stack;
+mod metadata_box;
 mod sized_allocator;
-mod metadata_allocator;
+//mod metadata_allocator;
 mod factory_chain;
 pub mod memory_source;
 pub mod global_allocator;
