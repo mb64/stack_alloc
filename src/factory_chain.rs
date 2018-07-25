@@ -1,7 +1,7 @@
 //! This allocator chooses from an array of `SizedAllocator`s based on the size of the allocation.
 //!
 //! It has a selection of static `SizedAllocator`s that it can choose from, with chunk sizes
-//! ranging from 1 byte to 16 KiB.
+//! ranging from 1 byte to 4 KiB.
 //!
 //! TODO better docs
 
@@ -53,34 +53,44 @@ impl<T: MemorySource> FactoryChain<T> {
         }
     }
 
-    unsafe fn get_large(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    fn small_mut(&mut self) -> Option<&mut SizedAllocator> {
+        self.small.as_mut().map(|x| &mut **x)
+    }
+    fn medium_mut(&mut self) -> Option<&mut SizedAllocator> {
+        self.medium.as_mut().map(|x| &mut **x)
+    }
+    fn large_mut(&mut self) -> Option<&mut SizedAllocator> {
+        self.large.as_mut().map(|x| &mut **x)
+    }
+
+    unsafe fn get_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         if self.large.is_none() {
             let large_alloc = SizedAllocator::from_memory_source::<T>(LARGE_CHUNK_SIZE, None).ok_or(alloc::AllocErr)?;
             self.large = Some(metadata_allocator::store_metadata(large_alloc));
         }
-        self.large.as_mut().ok_or(alloc::AllocErr)
+        self.large_mut().ok_or(alloc::AllocErr)
     }
-    unsafe fn get_medium(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    unsafe fn get_medium(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         if self.medium.is_none() {
             self.medium = self.get_large().ok().and_then(|large| {
                 let medium_alloc = SizedAllocator::from_sized_alloc_factory(MEDIUM_CHUNK_SIZE, large, None)?;
                 Some(metadata_allocator::store_metadata(medium_alloc))
             });
         }
-        self.medium.as_mut().ok_or(alloc::AllocErr)
+        self.medium_mut().ok_or(alloc::AllocErr)
     }
-    unsafe fn get_small(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    unsafe fn get_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         if self.small.is_none() {
             self.small = self.get_medium().ok().and_then(|medium| {
                 let small_alloc = SizedAllocator::from_sized_alloc_factory(SMALL_CHUNK_SIZE, medium, None)?;
                 Some(metadata_allocator::store_metadata(small_alloc))
             });
         }
-        self.small.as_mut().ok_or(alloc::AllocErr)
+        self.small_mut().ok_or(alloc::AllocErr)
     }
 
     /// Returns the owner of the given pointer, or `None` if no allocator claims to own it
-    fn owner_of(&mut self, ptr: ptr::NonNull<u8>) -> Option<&mut &'static mut SizedAllocator> {
+    fn owner_of(&mut self, ptr: ptr::NonNull<u8>) -> Option<&mut SizedAllocator> {
         let raw_ptr = ptr.as_ptr();
         if let Some(small) = self.small.as_mut().filter(|small| small.owns(raw_ptr)) {
             debug_log!("FactoryChain: small owns pointer %#zx\n\0", raw_ptr);
@@ -99,36 +109,36 @@ impl<T: MemorySource> FactoryChain<T> {
 
     /// Tries to add a new allocator to start of the `small` chain.  Returns that allocator on
     /// success, `None` on failure.
-    unsafe fn extend_small(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    unsafe fn extend_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_ref = {
             let old_small = self.small.take();
             let new_alloc = SizedAllocator::from_sized_alloc_factory(SMALL_CHUNK_SIZE, self.get_medium()?, old_small).ok_or(alloc::AllocErr)?;
             metadata_allocator::store_metadata(new_alloc)
         };
         self.small = Some(alloc_ref);
-        self.small.as_mut().ok_or(alloc::AllocErr)
+        self.small_mut().ok_or(alloc::AllocErr)
     }
     /// Tries to add a new allocator to start of the `medium` chain.  Returns that allocator on
     /// success, `None` on failure.
-    unsafe fn extend_medium(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    unsafe fn extend_medium(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_ref = {
             let old_medium = self.medium.take();
             let new_alloc = SizedAllocator::from_sized_alloc_factory(MEDIUM_CHUNK_SIZE, self.get_large()?, old_medium).ok_or(alloc::AllocErr)?;
             metadata_allocator::store_metadata(new_alloc)
         };
         self.medium = Some(alloc_ref);
-        self.medium.as_mut().ok_or(alloc::AllocErr)
+        self.medium_mut().ok_or(alloc::AllocErr)
     }
     /// Tries to add a new allocator to start of the `large` chain.  Returns that allocator on
     /// success, `None` on failure.
-    unsafe fn extend_large(&mut self) -> Result<&mut &'static mut SizedAllocator, alloc::AllocErr> {
+    unsafe fn extend_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_ref = {
             let old_large = self.large.take();
             let mut new_alloc = SizedAllocator::from_memory_source::<T>(LARGE_CHUNK_SIZE, old_large).ok_or(alloc::AllocErr)?;
             metadata_allocator::store_metadata(new_alloc)
         };
         self.large = Some(alloc_ref);
-        self.large.as_mut().ok_or(alloc::AllocErr)
+        self.large_mut().ok_or(alloc::AllocErr)
     }
 }
 
