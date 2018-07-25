@@ -68,16 +68,10 @@ impl BitmappedStack {
         self.current_height == 0
     }
 
-    /// For debug purposes, `debug_assert`s that the allocator completely deallocated
+    /// `debug_assert`s that the allocator is completely deallocated
     pub fn debug_assert_empty(&self) {
         debug_assert_eq!(self.bitmap, 0, "The mask is not zero :(");
         debug_assert_eq!(self.current_height, 0, "The height is not zero :(");
-    }
-
-    /// For debug purposes, `debug_assert`s that the allocator has made allocations
-    pub fn debug_assert_nonempty(&self) {
-        debug_assert_ne!(self.bitmap, 0, "The bitmap is zero :(");
-        debug_assert_ne!(self.current_height, 0, "The height is zero :(");
     }
 
     /// Returns the number of chunks required for the given number of bytes
@@ -114,24 +108,6 @@ impl BitmappedStack {
         };
 
         self.bitmap &= !mask;
-    }
-
-    /// Returns `true` iff the chunk is marked as allocated by the bitmap
-    fn is_chunk_allocated(&self, chunk: usize) -> bool {
-        debug_assert!(chunk < STACK_SIZE, "chunk {} out of bounds", chunk);
-        self.bitmap & (1 << chunk) != 0
-    }
-
-    /// Returns `true` if all the chunks in the range are marked as allocated in the bitmap
-    fn all_allocated(&self, chunk_range: ops::Range<usize>) -> bool {
-        debug_assert!(chunk_range.end <= STACK_SIZE);
-        let mask = {
-            let num_chunks = chunk_range.size_hint().0;
-            let mask_base = (1 << num_chunks) - 1;
-            mask_base << chunk_range.start
-        };
-
-        self.bitmap | (!mask) == !0
     }
 
     /// Returns `true` if all the chunks in the range are marked as deallocated in the bitmap

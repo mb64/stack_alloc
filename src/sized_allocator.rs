@@ -66,17 +66,6 @@ impl SizedAllocator {
         self.primary.pointer()
     }
 
-    /// Returns `true` if the pointer is within memory owned by the allocator
-    pub fn owns(&self, ptr: *const u8) -> bool {
-        if self.primary.owns(ptr) {
-            true
-        } else if let Some(ref backup) = self.backup {
-            backup.owns(ptr)
-        } else {
-            false
-        }
-    }
-
     pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, alloc::AllocErr> {
         debug_log!("SizedAllocator: allocing size %zu, align %zu\n\0", layout.size(), layout.align());
         if let memory@Ok(_) = self.primary.alloc(layout) {

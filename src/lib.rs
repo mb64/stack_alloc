@@ -47,7 +47,8 @@
 //! Now you can allocate all you want: all the memory used in `Box`, `Vec`, `String`, etc. will be
 //! obtained from `MyAmazingMemorySource` and then managed by the library.
 
-//#![no_std]
+#![no_std]
+
 #![feature(nll)]
 #![feature(alloc)]
 #![feature(allocator_api)]
@@ -60,8 +61,9 @@
         trivial_casts, trivial_numeric_casts,
         unused_import_braces, unused_qualifications)]
 
-extern crate core;
 extern crate alloc;
+
+#[cfg(any(feature = "debug_logs", feature = "test_memory_source"))]
 extern crate libc;
 
 #[macro_use]
@@ -73,8 +75,10 @@ mod factory_chain;
 pub mod memory_source;
 pub mod global_allocator;
 
-pub mod test_memory_source;
-pub use test_memory_source::MyGreatMemorySource;
+#[cfg(feature = "test_memory_source")]
+mod test_memory_source;
+#[cfg(feature = "test_memory_source")]
+pub use test_memory_source::TestMemorySource;
 
 pub use memory_source::MemorySource;
 pub use global_allocator::Allocator;

@@ -1,12 +1,11 @@
-
 #![feature(const_fn)]
 
 extern crate stack_alloc;
 
-use stack_alloc::{Allocator, test_memory_source::MyGreatMemorySource};
+use stack_alloc::{Allocator, TestMemorySource};
 
 #[global_allocator]
-static GLOBAL: Allocator<MyGreatMemorySource> = Allocator::new();
+static GLOBAL: Allocator<TestMemorySource> = Allocator::new();
 
 #[test]
 fn vecs() {
