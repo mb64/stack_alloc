@@ -48,6 +48,7 @@
 //! obtained from `MyAmazingMemorySource` and then managed by the library.
 
 //#![no_std]
+#![feature(nll)]
 #![feature(alloc)]
 #![feature(allocator_api)]
 #![feature(ptr_offset_from)]

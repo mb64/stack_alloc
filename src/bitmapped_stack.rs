@@ -2,7 +2,7 @@
 //!
 //! This way it can actually de-allocate things.
 
-use alloc::alloc::{self, Layout, Alloc, AllocErr};
+use alloc::alloc::{self, Layout, AllocErr};
 use core::ptr::NonNull;
 use core::ops;
 
@@ -22,7 +22,6 @@ fn round_up_to_alignment(x: usize, alignment: usize) -> usize {
 }
 
 /// An upwards-growing stack
-/// FIXME thread-safety
 #[derive(Debug)]
 pub struct BitmappedStack {
     /// The bottom of the stack
@@ -59,6 +58,16 @@ impl BitmappedStack {
         self.chunk_size
     }
 
+    /// Returns a pointer to the bottom of the stack
+    pub fn pointer(&self) -> NonNull<u8> {
+        self.bottom
+    }
+
+    /// Returns true iff there are no allocations on the stack
+    pub fn is_empty(&self) -> bool {
+        self.current_height == 0
+    }
+
     /// For debug purposes, `debug_assert`s that the allocator completely deallocated
     pub fn debug_assert_empty(&self) {
         debug_assert_eq!(self.bitmap, 0, "The mask is not zero :(");
@@ -72,7 +81,7 @@ impl BitmappedStack {
     }
 
     /// Returns the number of chunks required for the given number of bytes
-    pub fn chunks_for(&self, bytes: usize) -> usize {
+    fn chunks_for(&self, bytes: usize) -> usize {
         // Divide by chunk size, rounding up
         let mut res = bytes / self.chunk_size;
         if bytes % self.chunk_size != 0 {
@@ -108,13 +117,13 @@ impl BitmappedStack {
     }
 
     /// Returns `true` iff the chunk is marked as allocated by the bitmap
-    pub fn is_chunk_allocated(&self, chunk: usize) -> bool {
+    fn is_chunk_allocated(&self, chunk: usize) -> bool {
         debug_assert!(chunk < STACK_SIZE, "chunk {} out of bounds", chunk);
         self.bitmap & (1 << chunk) != 0
     }
 
     /// Returns `true` if all the chunks in the range are marked as allocated in the bitmap
-    pub fn all_allocated(&self, chunk_range: ops::Range<usize>) -> bool {
+    fn all_allocated(&self, chunk_range: ops::Range<usize>) -> bool {
         debug_assert!(chunk_range.end <= STACK_SIZE);
         let mask = {
             let num_chunks = chunk_range.size_hint().0;
@@ -126,7 +135,7 @@ impl BitmappedStack {
     }
 
     /// Returns `true` if all the chunks in the range are marked as deallocated in the bitmap
-    pub fn all_deallocated(&self, chunk_range: ops::Range<usize>) -> bool {
+    fn all_deallocated(&self, chunk_range: ops::Range<usize>) -> bool {
         debug_assert!(chunk_range.end <= STACK_SIZE);
         let mask = {
             let num_chunks = chunk_range.size_hint().0;
@@ -159,19 +168,9 @@ impl BitmappedStack {
     /// Lowers the height past as many deallocated chunks as possible
     fn shrink_height(&mut self) {
         self.current_height = 64 - self.bitmap.leading_zeros() as usize;
-        // while self.current_height > 0 && !self.is_chunk_allocated(self.current_height - 1) {
-            // self.current_height -= 1;
-        // }
     }
 
-    fn to_excess(&self, layout: Layout, ptr: NonNull<u8>) -> alloc::Excess {
-        let actual_size = self.usable_size(&layout).1;
-        alloc::Excess(ptr, actual_size)
-    }
-}
-
-unsafe impl Alloc for BitmappedStack {
-    unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocErr> {
+    pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocErr> {
         debug_log!("Allocing: align %zu, size %zu\n\0", layout.align(), layout.size());
         let bottom_of_alloc = {
             let stack_ptr = self.chunk_to_ptr(self.current_height);
@@ -195,7 +194,7 @@ unsafe impl Alloc for BitmappedStack {
         Ok(self.chunk_to_ptr(bottom_of_alloc))
     }
 
-    unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
+    pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
         debug_log!("Freeing: align %zu, size %zu\n\0", layout.align(), layout.size());
         debug_assert!(self.owns(ptr.as_ptr()));
         let start_chunk = self.ptr_to_chunk(ptr.as_ptr());
@@ -208,24 +207,7 @@ unsafe impl Alloc for BitmappedStack {
         debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
     }
     
-    fn usable_size(&self, layout: &Layout) -> (usize, usize) {
-        let chunks = self.chunks_for(layout.size());
-        let min = (chunks - 1)*self.chunk_size + 1;
-        let max = chunks*self.chunk_size;
-        debug_assert_eq!(self.chunks_for(min), chunks);
-        debug_assert_eq!(self.chunks_for(max), chunks);
-        (min, max)
-    }
-
-    unsafe fn alloc_excess(&mut self, layout: Layout) -> Result<alloc::Excess, AllocErr> {
-        self.alloc(layout).map(|ptr| self.to_excess(layout, ptr))
-    }
-
-    unsafe fn realloc_excess(&mut self, old_ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<alloc::Excess, AllocErr> {
-        self.realloc(old_ptr, layout, new_size).map(|ptr| self.to_excess(layout, ptr))
-    }
-
-    unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) {
         debug_log!("Shrinking: align %zu, size %zu to %zu\n\0", layout.align(), layout.size(), new_size);
         let new_chunks = self.chunks_for(new_size);
         let old_chunks = self.chunks_for(layout.size());
@@ -234,12 +216,14 @@ unsafe impl Alloc for BitmappedStack {
         self.bitmap_deallocate(new_end .. old_end);
         if self.current_height == old_end {
             self.current_height = new_end;
+            if new_size == 0 {
+                self.shrink_height();
+            }
         }
         debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
-        Ok(())
     }
 
-    unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
         debug_log!("Growing: align %zu, size %zu to %zu\n\0", layout.align(), layout.size(), new_size);
         let new_chunks = self.chunks_for(new_size);
         let old_chunks = self.chunks_for(layout.size());

@@ -50,7 +50,8 @@ struct Lock<'a, T: MemorySource + 'a>(&'a Allocator<T>);
 
 impl<'a, T: MemorySource + 'a> Drop for Lock<'a, T> {
     fn drop(&mut self) {
-        debug_assert!(self.0.lock.swap(false, Ordering::SeqCst));
+        let prev = self.0.lock.swap(false, Ordering::SeqCst);
+        debug_assert_eq!(prev, true);
     }
 }
 

@@ -9,9 +9,10 @@ use core::alloc::{self, Alloc, Layout};
 use core::marker::PhantomData;
 use core::ptr;
 
-use sized_allocator::SizedAllocator;
+use bitmapped_stack::STACK_SIZE;
 use memory_source::MemorySource;
 use metadata_allocator;
+use sized_allocator::{SizedAllocator, DeallocResponse};
 
 const LARGE_CHUNK_SIZE: usize = 4096;
 const MEDIUM_CHUNK_SIZE: usize = 64;
@@ -179,7 +180,17 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
         if layout.size() == 0 {
             return;
         }
-        self.owner_of(ptr).expect("No allocator owns the memory to deallocate").dealloc(ptr, layout);
+        let owner = self.owner_of(ptr).expect("No allocator owns the memory to deallocate");
+        if let DeallocResponse::FreeAllocator(allocator) = owner.dealloc(ptr, layout) {
+            let stack_layout = {
+                let size = allocator.chunk_size() * STACK_SIZE;
+                let layout = allocator.chunk_size();
+                Layout::from_size_align_unchecked(size, layout)
+            };
+            let stack_ptr = allocator.stack_pointer();
+            self.dealloc(stack_ptr, stack_layout);
+            // FIXME doesn't free the metadata
+        }
     }
 
     unsafe fn realloc(&mut self, ptr: ptr::NonNull<u8>, layout: Layout, new_size: usize) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
@@ -188,9 +199,8 @@ unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
         {
             let alloc = self.owner_of(ptr).expect("No allocator claims to own the memory");
             if new_size <= layout.size() {
-                if alloc.shrink_in_place(ptr, layout, new_size).is_ok() {
-                    return Ok(ptr);
-                }
+                alloc.shrink_in_place(ptr, layout, new_size);
+                return Ok(ptr);
             } else {
                 if alloc.grow_in_place(ptr, layout, new_size).is_ok() {
                     return Ok(ptr);

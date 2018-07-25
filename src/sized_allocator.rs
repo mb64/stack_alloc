@@ -1,12 +1,27 @@
-//! This module implements the method for managing stacks of a given size.
-//!
-//! TODO: how to create a SizedAllocator?
+//! This module implements the method for managing linked lists of stacks of a consistent size.
 
-use core::alloc::{self, Alloc, Layout};
+use core::alloc::{self, Layout};
 use core::ptr::NonNull;
 
 use bitmapped_stack::{BitmappedStack, STACK_SIZE};
 use memory_source::{self, MemorySource};
+
+/// The recommended action after deallocating
+pub enum DeallocResponse {
+    /// Do nothing; everything's good
+    Nothing,
+
+    /// Remove this allocator and free its stack because it's empty
+    ///
+    /// It should be replaced by its backup allocator, if any
+    Collapse,
+
+    /// The given allocator should be freed; both the metadata and its stack.
+    ///
+    /// This happens when another allocator down the line was collapsed and its memory needs to be
+    /// freed.
+    FreeAllocator(&'static mut SizedAllocator),
+}
 
 /// The `SizedAllocator` type is the type that implements `GlobalAlloc`
 ///
@@ -52,7 +67,7 @@ impl SizedAllocator {
     }
 
     /// Returns the smallest size allocation possible
-    fn chunk_size(&self) -> usize {
+    pub fn chunk_size(&self) -> usize {
         let size = self.primary.chunk_size();
 
         #[cfg(debug_asserts)]
@@ -65,6 +80,11 @@ impl SizedAllocator {
         size
     }
 
+    /// Returns a pointer to the bottom of the stack
+    pub fn stack_pointer(&self) -> NonNull<u8> {
+        self.primary.pointer()
+    }
+
     /// Returns `true` if the pointer is within memory owned by the allocator
     pub fn owns(&self, ptr: *const u8) -> bool {
         if self.primary.owns(ptr) {
@@ -75,10 +95,8 @@ impl SizedAllocator {
             false
         }
     }
-}
 
-unsafe impl Alloc for SizedAllocator {
-    unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, alloc::AllocErr> {
+    pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, alloc::AllocErr> {
         debug_log!("SizedAllocator: allocing size %zu, align %zu\n\0", layout.size(), layout.align());
         if let memory@Ok(_) = self.primary.alloc(layout) {
             memory
@@ -88,21 +106,36 @@ unsafe impl Alloc for SizedAllocator {
         }
     }
 
-    unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
+    pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) -> DeallocResponse {
         debug_log!("SizedAllocator: deallocing size %zu, align %zu\n\0", layout.size(), layout.align());
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
             self.primary.dealloc(ptr, layout);
-        } else if let Some(ref mut backup) = self.backup {
+            if self.primary.is_empty() {
+                DeallocResponse::Collapse
+            } else {
+                DeallocResponse::Nothing
+            }
+        } else if let Some(backup) = self.backup.take() {
             debug_log!("    (Primary does not own it)\n\0");
-            backup.dealloc(ptr, layout);
+            match backup.dealloc(ptr, layout) {
+                DeallocResponse::Collapse => {
+                    backup.primary.debug_assert_empty();
+                    self.backup = backup.backup.take();
+                    DeallocResponse::FreeAllocator(backup)
+                },
+                x => {
+                    self.backup = Some(backup);
+                    x
+                },
+            }
         } else {
             debug_log!("    (Primary does not own it, and there is no backup)\n\0");
             unreachable!("If the primary doesn't own the memory to dealloc, there must be a backup")
         }
     }
 
-    unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) {
         debug_log!("SizedAllocator: attempting to shrink size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
@@ -116,7 +149,7 @@ unsafe impl Alloc for SizedAllocator {
         }
     }
 
-    unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
+    pub unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
         debug_log!("SizedAllocator: attempting to grow size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
