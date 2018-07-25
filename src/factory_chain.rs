@@ -12,7 +12,6 @@ use core::ptr;
 use bitmapped_stack::STACK_SIZE;
 use memory_source::MemorySource;
 use metadata_box::MetadataBox;
-//use metadata_allocator;
 use sized_allocator::{SizedAllocator, DeallocResponse};
 
 const SMALL_CHUNK_SIZE: usize = 1;
@@ -142,21 +141,6 @@ impl<T: MemorySource> FactoryChain<T> {
                 None
             },
         }
-        /*
-        if let Some(small) = self.small.as_mut().filter(|small| small.owns(raw_ptr)) {
-            debug_log!("FactoryChain: small owns pointer %#zx\n\0", raw_ptr);
-            Some(small)
-        } else if let Some(medium) = self.medium.as_mut().filter(|medium| medium.owns(raw_ptr)) {
-            debug_log!("FactoryChain: medium owns pointer %#zx\n\0", raw_ptr);
-            Some(medium)
-        } else if let Some(large) = self.large.as_mut().filter(|large| large.owns(raw_ptr)) {
-            debug_log!("FactoryChain: large owns pointer %#zx\n\0", raw_ptr);
-            Some(large)
-        } else {
-            debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", raw_ptr);
-            None
-        }
-        */
     }
 
     // FIXME (unimportant) these discard the entire chain of allocators on some failures
@@ -316,22 +300,6 @@ impl<T: MemorySource> FactoryChain<T> {
 unsafe impl<T: MemorySource> Alloc for FactoryChain<T> {
     unsafe fn alloc(&mut self, layout: Layout) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
         debug_log!("FactoryChain: allocating size %zu align %zu\n\0", layout.size(), layout.align());
-        /*match layout.size() {
-            0       => Err(alloc::AllocErr),
-            1 ..=47 => {
-                debug_log!("small\n\0");
-                self.alloc_small(layout)
-            },
-            48..=3_499 => {
-                debug_log!("medium\n\0");
-                self.alloc_medium(layout)
-            },
-            3_500..=262_144 => {
-                debug_log!("large\n\0");
-                self.alloc_large(layout)
-            },
-            _ => Err(alloc::AllocErr),
-        }*/
         if let Some(category) = SizeCategory::choose(layout.size()) {
             self.alloc_size(layout, category)
         } else {
