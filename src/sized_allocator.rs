@@ -1,6 +1,7 @@
 //! This module implements the method for managing linked lists of stacks of a consistent size.
 
 use core::alloc::{self, Layout};
+use core::cmp;
 use core::ptr::NonNull;
 
 use bitmapped_stack::BitmappedStack;
@@ -29,6 +30,8 @@ pub struct SizedAllocator {
     primary: BitmappedStack,
     /// The backup allocator should have the same size chunk as the primary allocator
     backup: Option<MetadataBox<SizedAllocator>>,
+    /// The largest contiguous group of memory left in both the primary and backup
+    largest_space_left: usize,
 }
 
 impl SizedAllocator {
@@ -44,6 +47,7 @@ impl SizedAllocator {
         SizedAllocator {
             primary: BitmappedStack::new(memory, chunk_size),
             backup: backup,
+            largest_space_left: 64,
         }
     }
 
@@ -66,13 +70,28 @@ impl SizedAllocator {
         self.primary.pointer()
     }
 
+    fn set_largest_space_left(&mut self) {
+        let backup_space_left = match &self.backup {
+            Some(backup) => backup.largest_space_left,
+            None => 0,
+        };
+        self.largest_space_left = cmp::max(self.primary.chunks_left(), backup_space_left);
+    }
+
     pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, alloc::AllocErr> {
         debug_log!("SizedAllocator: allocing size %zu, align %zu\n\0", layout.size(), layout.align());
+        if layout.size() > self.chunk_size() * self.largest_space_left {
+            debug_log!("  (short-circuiting the list because it's too big)\n\0");
+            return Err(alloc::AllocErr);
+        }
         if let memory@Ok(_) = self.primary.alloc(layout) {
+            self.set_largest_space_left();
             memory
         } else {
             let backup = self.backup.as_mut().ok_or(alloc::AllocErr)?;
-            backup.alloc(layout)
+            let res = backup.alloc(layout);
+            self.set_largest_space_left();
+            res
         }
     }
 
@@ -81,6 +100,7 @@ impl SizedAllocator {
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
             self.primary.dealloc(ptr, layout);
+            self.set_largest_space_left();
             if self.primary.is_empty() {
                 DeallocResponse::Collapse
             } else {
@@ -92,10 +112,12 @@ impl SizedAllocator {
                 DeallocResponse::Collapse => {
                     backup.primary.debug_assert_empty();
                     self.backup = backup.backup.take();
+                    self.set_largest_space_left();
                     DeallocResponse::FreeAllocator(backup)
                 },
                 x => {
                     self.backup = Some(backup);
+                    self.set_largest_space_left();
                     x
                 },
             }
@@ -109,10 +131,12 @@ impl SizedAllocator {
         debug_log!("SizedAllocator: attempting to shrink size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
-            self.primary.shrink_in_place(ptr, layout, new_size)
+            self.primary.shrink_in_place(ptr, layout, new_size);
+            self.set_largest_space_left();
         } else if let Some(ref mut backup) = self.backup {
             debug_log!("    (Primary does not own it)\n\0");
-            backup.shrink_in_place(ptr, layout, new_size)
+            backup.shrink_in_place(ptr, layout, new_size);
+            self.set_largest_space_left();
         } else {
             debug_log!("    (Primary does not own it, and there is no backup)\n\0");
             unreachable!("If the primary doesn't own the memory to shrink, there must be a backup")
@@ -123,10 +147,22 @@ impl SizedAllocator {
         debug_log!("SizedAllocator: attempting to grow size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
-            self.primary.grow_in_place(ptr, layout, new_size)
+            match self.primary.grow_in_place(ptr, layout, new_size) {
+                Ok(()) => {
+                    self.set_largest_space_left();
+                    Ok(())
+                },
+                err => err,
+            }
         } else if let Some(ref mut backup) = self.backup {
             debug_log!("    (Primary does not own it)\n\0");
-            backup.grow_in_place(ptr, layout, new_size)
+            match backup.grow_in_place(ptr, layout, new_size) {
+                Ok(()) => {
+                    self.set_largest_space_left();
+                    Ok(())
+                },
+                err => err,
+            }
         } else {
             debug_log!("    (Primary does not own it, and there is no backup)\n\0");
             unreachable!("If the primary doesn't own the memory to grow, there must be a backup")

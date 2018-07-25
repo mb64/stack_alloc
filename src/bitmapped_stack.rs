@@ -68,6 +68,12 @@ impl BitmappedStack {
         self.current_height == 0
     }
 
+    /// Returns the number of chunks left in the stack
+    pub fn chunks_left(&self) -> usize {
+        debug_assert!(STACK_SIZE >= self.current_height);
+        STACK_SIZE - self.current_height
+    }
+
     /// `debug_assert`s that the allocator is completely deallocated
     pub fn debug_assert_empty(&self) {
         debug_assert_eq!(self.bitmap, 0, "The mask is not zero :(");
