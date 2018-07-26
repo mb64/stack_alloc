@@ -70,6 +70,17 @@ impl SizedAllocator {
         self.primary.pointer()
     }
 
+    /// Returns `true` if it owns the memory
+    pub fn owns(&self, ptr: NonNull<u8>) -> bool {
+        if self.primary.owns(ptr.as_ptr()) {
+            true
+        } else if let Some(backup) = &self.backup {
+            backup.owns(ptr)
+        } else {
+            false
+        }
+    }
+
     fn set_largest_space_left(&mut self) {
         let backup_space_left = match &self.backup {
             Some(backup) => backup.largest_space_left,

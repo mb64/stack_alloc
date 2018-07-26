@@ -263,13 +263,20 @@ impl<T: MemorySource> FactoryChain<T> {
             let memory = T::get_block().ok_or(alloc::AllocErr)?;
             let old_very_large = self.very_large.take();
             let mut new_alloc = SizedAllocator::from_memory_chunk(VERY_LARGE_CHUNK_SIZE, memory, old_very_large);
-            if self.metadata.is_none() {
-                let metadata_memory = new_alloc.alloc(Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE))?;
-                let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, None);
-                let mem_for_metadata = metadata_alloc.alloc(Layout::new::<SizedAllocator>())?;
-                self.metadata = Some(MetadataBox::from_pointer_data(mem_for_metadata, metadata_alloc));
+            if let Some(new_alloc_place) = self.metadata.as_mut().and_then(|ma| ma.alloc(Layout::new::<SizedAllocator>()).ok()) {
+                MetadataBox::from_pointer_data(new_alloc_place, new_alloc)
+            } else {
+                let mut metadata_alloc_box = {
+                    let metadata_memory = new_alloc.alloc(Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE))?;
+                    let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, None);
+                    let metadata_alloc_place = metadata_alloc.alloc(Layout::new::<SizedAllocator>()).unwrap(); // unwrap bc it shouldn't fail
+                    MetadataBox::from_pointer_data(metadata_alloc_place, metadata_alloc)
+                };
+                let new_alloc_place = metadata_alloc_box.alloc(Layout::new::<SizedAllocator>()).unwrap(); // unwrap bc it shouldn't fail
+                let res = MetadataBox::from_pointer_data(new_alloc_place, new_alloc);
+                self.metadata = Some(metadata_alloc_box);
+                res
             }
-            self.store_metadata(new_alloc)?
         };
         self.very_large = Some(alloc_box);
         self.very_large_mut().ok_or(alloc::AllocErr)
