@@ -36,24 +36,33 @@ struct GLOBAL: Allocator<MyMemorySource> = Allocator::new();
 
 `stack_alloc` has some great (and some slightly-less-great) features:
 
-### It's (minimally) thread-safe.
+### It's (minimally) thread-safe
 
 It uses a single top-level allocator lock so that only one thread can allocate memory at a time.
 
-### It's pretty slow.
+### It's not too slow
 
 The only kind of a benchmark I've done is pretty simple.
 
  * I downloaded two copies of Ripgrep [from git](https://github.com/BurntSushi/ripgrep), and edited one to use this allocator with a simple test
    memory source
- * I built each with a simple `cargo build --release`
- * Then, I ran `time target/release/rg -Hn -j1 -e 'ripgrep' >/dev/null` several times in each directory and recorded the fastest time for each.
+ * I built each with `cargo build --release`
+ * Then, I ran `time target/release/rg -Hn -j1 -e 'ripgrep' >/dev/null` many times in each directory and recorded the fastest time for each.
 
 The numbers were:
- * Ripgrep with `stack_alloc`: 35 ms
- * Ripgrep with Jemalloc: 32 ms
+ * Ripgrep with Jemalloc: 26 ms
+ * Ripgrep with `stack_alloc`: 27 ms
 
-So it's not intolerably slow, but it's still pretty slow.
+The numbers generally ranged anywhere from 29 to 38 milliseconds for each, though, and the numbers were very comparable.
+
+I also did some threaded tests (`-j4` for my laptop), thoroughly expecting Jemalloc to win here.  Here were the numbers:
+ * Ripgrep with Jemalloc: 25 ms -- this was about 2-3 ms faster, on average
+ * Ripgrep with `stack_alloc`: 30 ms -- this was about 2-3 ms slower
+
+So TL;DR: it's not terrible.
+
+(Disclaimer: these numbers are totally unscientific.  They're very similar, not very accurate, and Ripgrep is heavily optimized, which includes
+not allocating much.)
 
 ### It's flexible in where it gets its memory
 
