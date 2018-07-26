@@ -93,27 +93,33 @@ impl BitmappedStack {
     /// Mark the chunks as allocated in the bitmap
     unsafe fn bitmap_allocate(&mut self, chunk_range: ops::Range<usize>) {
         debug_assert!(chunk_range.end <= STACK_SIZE);
-        let mask = {
-            let num_chunks = chunk_range.size_hint().0;
-            // Wrapping ops in case of (1 << 64) - 1 which overflows
-            let mask_base = 1_u64.wrapping_shl(num_chunks as u32).wrapping_sub(1);
-            mask_base << chunk_range.start
-        };
 
-        self.bitmap |= mask;
+        let num_chunks = chunk_range.size_hint().0;
+        if num_chunks > 0 {
+            let mask = {
+                // Wrapping ops in case of (1 << 64) - 1 which overflows
+                let mask_base = 1_u64.wrapping_shl(num_chunks as u32).wrapping_sub(1);
+                mask_base << chunk_range.start
+            };
+
+            self.bitmap |= mask;
+        }
     }
 
     /// Mark the chunks as deallocated in the bitmap
     unsafe fn bitmap_deallocate(&mut self, chunk_range: ops::Range<usize>) {
         debug_assert!(chunk_range.end <= STACK_SIZE);
-        let mask = {
-            let num_chunks = chunk_range.size_hint().0;
-            // Wrapping ops in case of (1 << 64) - 1 which overflows
-            let mask_base = 1_u64.wrapping_shl(num_chunks as u32).wrapping_sub(1);
-            mask_base << chunk_range.start
-        };
 
-        self.bitmap &= !mask;
+        let num_chunks = chunk_range.size_hint().0;
+        if num_chunks > 0 {
+            let mask = {
+                // Wrapping ops in case of (1 << 64) - 1 which overflows
+                let mask_base = 1_u64.wrapping_shl(num_chunks as u32).wrapping_sub(1);
+                mask_base << chunk_range.start
+            };
+
+            self.bitmap &= !mask;
+        }
     }
 
     /// Returns `true` if all the chunks in the range are marked as deallocated in the bitmap
