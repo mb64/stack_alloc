@@ -153,31 +153,35 @@ impl<T: MemorySource> FactoryChain<T> {
     }
 
     /// Returns the owner of the given pointer, or `None` if no allocator claims to own it
-    fn owner_of(&mut self, ptr: ptr::NonNull<u8>, layout: Layout) -> Option<&mut SizedAllocator> {
-        let _raw_ptr = ptr.as_ptr();
+    fn owner_of(&mut self, _ptr: ptr::NonNull<u8>, layout: Layout) -> Option<&mut SizedAllocator> {
         match SizeCategory::choose(layout.size()) {
             Some(SizeCategory::VerySmall) => {
-                debug_log!("FactoryChain: very small owns pointer %#zx\n\0", _raw_ptr);
+                debug_log!("FactoryChain: very small owns pointer %#zx\n\0", _ptr);
+                debug_assert!(self.very_small.as_ref().map_or(false, |vs| vs.owns(_ptr)));
                 self.very_small_mut()
             },
             Some(SizeCategory::Small) => {
-                debug_log!("FactoryChain: small owns pointer %#zx\n\0", _raw_ptr);
+                debug_log!("FactoryChain: small owns pointer %#zx\n\0", _ptr);
+                debug_assert!(self.small.as_ref().map_or(false, |s| s.owns(_ptr)));
                 self.small_mut()
             },
             Some(SizeCategory::Medium) => {
-                debug_log!("FactoryChain: medium owns pointer %#zx\n\0", _raw_ptr);
+                debug_log!("FactoryChain: medium owns pointer %#zx\n\0", _ptr);
+                debug_assert!(self.medium.as_ref().map_or(false, |m| m.owns(_ptr)));
                 self.medium_mut()
             },
             Some(SizeCategory::Large) => {
-                debug_log!("FactoryChain: large owns pointer %#zx\n\0", _raw_ptr);
+                debug_log!("FactoryChain: large owns pointer %#zx\n\0", _ptr);
+                debug_assert!(self.large.as_ref().map_or(false, |l| l.owns(_ptr)));
                 self.large_mut()
             },
             Some(SizeCategory::VeryLarge) => {
-                debug_log!("FactoryChain: very large owns pointer %#zx\n\0", _raw_ptr);
+                debug_log!("FactoryChain: very large owns pointer %#zx\n\0", _ptr);
+                debug_assert!(self.very_large.as_ref().map_or(false, |vl| vl.owns(_ptr)));
                 self.very_large_mut()
             },
             None => {
-                debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", _raw_ptr);
+                debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", _ptr);
                 None
             },
         }
