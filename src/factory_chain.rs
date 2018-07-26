@@ -272,7 +272,7 @@ impl<T: MemorySource> FactoryChain<T> {
             } else {
                 let mut metadata_alloc_box = {
                     let metadata_memory = new_alloc.alloc(Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE))?;
-                    let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, None);
+                    let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, self.metadata.take());
                     let metadata_alloc_place = metadata_alloc.alloc(Layout::new::<SizedAllocator>()).unwrap(); // unwrap bc it shouldn't fail
                     MetadataBox::from_pointer_data(metadata_alloc_place, metadata_alloc)
                 };
