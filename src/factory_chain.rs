@@ -14,26 +14,32 @@ use memory_source::MemorySource;
 use metadata_box::MetadataBox;
 use sized_allocator::{SizedAllocator, DeallocResponse};
 
-const SMALL_CHUNK_SIZE: usize = 1;
+const VERY_SMALL_CHUNK_SIZE: usize = 1;
+const SMALL_CHUNK_SIZE: usize = 8;
 const MEDIUM_CHUNK_SIZE: usize = 64;
-const LARGE_CHUNK_SIZE: usize = 4096;
+const LARGE_CHUNK_SIZE: usize = 512;
+const VERY_LARGE_CHUNK_SIZE: usize = 4096;
 
 const METADATA_CHUNK_SIZE: usize = 64;
 
 /// What size allocator an allocation belongs to
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 enum SizeCategory {
+    VerySmall,
     Small,
     Medium,
     Large,
+    VeryLarge,
 }
 impl SizeCategory {
     fn choose(size: usize) -> Option<Self> {
         match size {
             0 => None,
-            1..=47 => Some(SizeCategory::Small),
-            48..=3499 => Some(SizeCategory::Medium),
-            3500..=262144 => Some(SizeCategory::Large),
+            1..=7 => Some(SizeCategory::VerySmall),
+            8..=63 => Some(SizeCategory::Small),
+            64..=511 => Some(SizeCategory::Medium),
+            511..=4095 => Some(SizeCategory::Large),
+            4096..=262144 => Some(SizeCategory::VeryLarge),
             _ => None,
         }
     }
@@ -46,13 +52,17 @@ impl SizeCategory {
 #[derive(Debug)]
 pub struct FactoryChain<T: MemorySource> {
     /// 1 byte chunk size
+    very_small: Option<MetadataBox<SizedAllocator>>,
+    /// 8 byte chunk size
     small: Option<MetadataBox<SizedAllocator>>,
     /// 64 byte chunk size
     medium: Option<MetadataBox<SizedAllocator>>,
     /// Another 64-byte chunk size, for the metadata
     metadata: Option<MetadataBox<SizedAllocator>>,
-    /// 4 KiB chunk size
+    /// 512 byte chunk size
     large: Option<MetadataBox<SizedAllocator>>,
+    /// 4 KiB chunk size
+    very_large: Option<MetadataBox<SizedAllocator>>,
     /// Gives 256 KiB chunks
     source: PhantomData<T>,
 }
@@ -70,14 +80,19 @@ impl<T: MemorySource> FactoryChain<T> {
     /// allocators.
     pub const fn new() -> Self {
         FactoryChain {
+            very_small: None,
             small: None,
             medium: None,
             large: None,
+            very_large: None,
             metadata: None,
             source: PhantomData,
         }
     }
 
+    fn very_small_mut(&mut self) -> Option<&mut SizedAllocator> {
+        self.very_small.as_mut().map(|x| &mut **x)
+    }
     fn small_mut(&mut self) -> Option<&mut SizedAllocator> {
         self.small.as_mut().map(|x| &mut **x)
     }
@@ -90,7 +105,17 @@ impl<T: MemorySource> FactoryChain<T> {
     fn large_mut(&mut self) -> Option<&mut SizedAllocator> {
         self.large.as_mut().map(|x| &mut **x)
     }
+    fn very_large_mut(&mut self) -> Option<&mut SizedAllocator> {
+        self.very_large.as_mut().map(|x| &mut **x)
+    }
 
+    unsafe fn get_very_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
+        if self.very_large.is_none() {
+            self.extend_very_large()
+        } else {
+            self.very_large_mut().ok_or(alloc::AllocErr)
+        }
+    }
     unsafe fn get_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         if self.large.is_none() {
             self.extend_large()
@@ -119,11 +144,22 @@ impl<T: MemorySource> FactoryChain<T> {
             self.small_mut().ok_or(alloc::AllocErr)
         }
     }
+    unsafe fn get_very_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
+        if self.very_small.is_none() {
+            self.extend_very_small()
+        } else {
+            self.very_small_mut().ok_or(alloc::AllocErr)
+        }
+    }
 
     /// Returns the owner of the given pointer, or `None` if no allocator claims to own it
     fn owner_of(&mut self, ptr: ptr::NonNull<u8>, layout: Layout) -> Option<&mut SizedAllocator> {
         let _raw_ptr = ptr.as_ptr();
         match SizeCategory::choose(layout.size()) {
+            Some(SizeCategory::VerySmall) => {
+                debug_log!("FactoryChain: very small owns pointer %#zx\n\0", _raw_ptr);
+                self.very_small_mut()
+            },
             Some(SizeCategory::Small) => {
                 debug_log!("FactoryChain: small owns pointer %#zx\n\0", _raw_ptr);
                 self.small_mut()
@@ -136,6 +172,10 @@ impl<T: MemorySource> FactoryChain<T> {
                 debug_log!("FactoryChain: large owns pointer %#zx\n\0", _raw_ptr);
                 self.large_mut()
             },
+            Some(SizeCategory::VeryLarge) => {
+                debug_log!("FactoryChain: very large owns pointer %#zx\n\0", _raw_ptr);
+                self.very_large_mut()
+            },
             None => {
                 debug_log!("FactoryChain: no one owns pointer %#zx!\n\0", _raw_ptr);
                 None
@@ -144,12 +184,25 @@ impl<T: MemorySource> FactoryChain<T> {
     }
 
     // FIXME (unimportant) these discard the entire chain of allocators on some failures
+    /// Tries to add a new allocator to start of the `very_small` chain.  Returns that allocator on
+    /// success, `AllocErr` on failure.
+    unsafe fn extend_very_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
+        let alloc_box = {
+            let layout = Layout::from_size_align_unchecked(VERY_SMALL_CHUNK_SIZE*STACK_SIZE, VERY_SMALL_CHUNK_SIZE);
+            let memory = self.alloc_medium(layout)?;
+            let old_very_small = self.very_small.take();
+            let new_alloc = SizedAllocator::from_memory_chunk(VERY_SMALL_CHUNK_SIZE, memory, old_very_small);
+            self.store_metadata(new_alloc)?
+        };
+        self.very_small = Some(alloc_box);
+        self.very_small_mut().ok_or(alloc::AllocErr)
+    }
     /// Tries to add a new allocator to start of the `small` chain.  Returns that allocator on
     /// success, `AllocErr` on failure.
     unsafe fn extend_small(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_box = {
             let layout = Layout::from_size_align_unchecked(SMALL_CHUNK_SIZE*STACK_SIZE, SMALL_CHUNK_SIZE);
-            let memory = self.alloc_medium(layout)?;
+            let memory = self.alloc_large(layout)?;
             let old_small = self.small.take();
             let new_alloc = SizedAllocator::from_memory_chunk(SMALL_CHUNK_SIZE, memory, old_small);
             self.store_metadata(new_alloc)?
@@ -162,7 +215,7 @@ impl<T: MemorySource> FactoryChain<T> {
     unsafe fn extend_medium(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_box = {
             let layout = Layout::from_size_align_unchecked(MEDIUM_CHUNK_SIZE*STACK_SIZE, MEDIUM_CHUNK_SIZE);
-            let memory = self.alloc_large(layout)?;
+            let memory = self.alloc_very_large(layout)?;
             let old_medium = self.medium.take();
             let new_alloc = SizedAllocator::from_memory_chunk(MEDIUM_CHUNK_SIZE, memory, old_medium);
             self.store_metadata(new_alloc)?
@@ -176,7 +229,7 @@ impl<T: MemorySource> FactoryChain<T> {
         let alloc_box = {
             let (mut metadata_alloc, more_metadata) = {
                 let layout = Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE);
-                let (memory, more_metadata) = self.alloc_large_no_metadata(layout)?;
+                let (memory, more_metadata) = self.alloc_very_large_no_metadata(layout)?;
                 let old_metadata = self.metadata.take();
                 (SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, memory, old_metadata), more_metadata)
             };
@@ -194,9 +247,22 @@ impl<T: MemorySource> FactoryChain<T> {
     /// success, `AllocErr` on failure.
     unsafe fn extend_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
         let alloc_box = {
-            let memory = T::get_block().ok_or(alloc::AllocErr)?;
+            let layout = Layout::from_size_align_unchecked(LARGE_CHUNK_SIZE*STACK_SIZE, LARGE_CHUNK_SIZE);
+            let memory = self.alloc_very_large(layout)?;
             let old_large = self.large.take();
-            let mut new_alloc = SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, memory, old_large);
+            let new_alloc = SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, memory, old_large);
+            self.store_metadata(new_alloc)?
+        };
+        self.large = Some(alloc_box);
+        self.large_mut().ok_or(alloc::AllocErr)
+    }
+    /// Tries to add a new allocator to start of the `large` chain.  Returns that allocator on
+    /// success, `AllocErr` on failure.
+    unsafe fn extend_very_large(&mut self) -> Result<&mut SizedAllocator, alloc::AllocErr> {
+        let alloc_box = {
+            let memory = T::get_block().ok_or(alloc::AllocErr)?;
+            let old_very_large = self.very_large.take();
+            let mut new_alloc = SizedAllocator::from_memory_chunk(VERY_LARGE_CHUNK_SIZE, memory, old_very_large);
             if self.metadata.is_none() {
                 let metadata_memory = new_alloc.alloc(Layout::from_size_align_unchecked(METADATA_CHUNK_SIZE*STACK_SIZE, METADATA_CHUNK_SIZE))?;
                 let mut metadata_alloc = SizedAllocator::from_memory_chunk(METADATA_CHUNK_SIZE, metadata_memory, None);
@@ -205,10 +271,18 @@ impl<T: MemorySource> FactoryChain<T> {
             }
             self.store_metadata(new_alloc)?
         };
-        self.large = Some(alloc_box);
-        self.large_mut().ok_or(alloc::AllocErr)
+        self.very_large = Some(alloc_box);
+        self.very_large_mut().ok_or(alloc::AllocErr)
     }
 
+    /// Tries to allocate from the `very_small` chain, extending it if necessary.
+    unsafe fn alloc_very_small(&mut self, layout: Layout) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
+        debug_assert!(layout.size() <= VERY_SMALL_CHUNK_SIZE*STACK_SIZE);
+        match self.get_very_small()?.alloc(layout) {
+            Ok(mem) => Ok(mem),
+            Err(_) => self.extend_very_small()?.alloc(layout),
+        }
+    }
     /// Tries to allocate from the `small` chain, extending it if necessary.
     unsafe fn alloc_small(&mut self, layout: Layout) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
         debug_assert!(layout.size() <= SMALL_CHUNK_SIZE*STACK_SIZE);
@@ -241,48 +315,58 @@ impl<T: MemorySource> FactoryChain<T> {
             Err(_) => self.extend_large()?.alloc(layout),
         }
     }
+    /// Tries to allocate from the `very_large` chain, extending it if necessary.
+    unsafe fn alloc_very_large(&mut self, layout: Layout) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
+        debug_assert!(layout.size() <= VERY_LARGE_CHUNK_SIZE*STACK_SIZE);
+        match self.get_very_large()?.alloc(layout) {
+            Ok(mem) => Ok(mem),
+            Err(_) => self.extend_very_large()?.alloc(layout),
+        }
+    }
 
     /// Tries to allocate from the chain that corresponds to the size category, extending it if
     /// neccessary
     unsafe fn alloc_size(&mut self, layout: Layout, size_category: SizeCategory) -> Result<ptr::NonNull<u8>, alloc::AllocErr> {
         match size_category {
+            SizeCategory::VerySmall => self.alloc_very_small(layout),
             SizeCategory::Small => self.alloc_small(layout),
             SizeCategory::Medium => self.alloc_medium(layout),
             SizeCategory::Large => self.alloc_large(layout),
+            SizeCategory::VeryLarge => self.alloc_very_large(layout),
         }
     }
 
     /// Tries to allocate from the `large` chain, extending it if necessary, but doesn't store away
     /// any extra metadata created
-    unsafe fn alloc_large_no_metadata(&mut self, layout: Layout) -> Result<(ptr::NonNull<u8>, Option<SizedAllocator>), alloc::AllocErr> {
-        debug_assert!(layout.size() <= LARGE_CHUNK_SIZE*STACK_SIZE);
+    unsafe fn alloc_very_large_no_metadata(&mut self, layout: Layout) -> Result<(ptr::NonNull<u8>, Option<SizedAllocator>), alloc::AllocErr> {
+        debug_assert!(layout.size() <= VERY_LARGE_CHUNK_SIZE*STACK_SIZE);
 
-        if let Some(ref mut large) = self.large {
-            if let Ok(mem) = large.alloc(layout) {
+        if let Some(ref mut very_large) = self.very_large {
+            if let Ok(mem) = very_large.alloc(layout) {
                 Ok((mem, None))
             } else {
                 // Extend it without storing metadata...
-                let mut new_large = {
+                let mut new_very_large = {
                     let new_mem = T::get_block().ok_or(alloc::AllocErr)?;
-                    let old_large = self.large.take();
-                    SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, new_mem, old_large)
+                    let old_very_large = self.very_large.take();
+                    SizedAllocator::from_memory_chunk(VERY_LARGE_CHUNK_SIZE, new_mem, old_very_large)
                 };
-                if let Ok(mem) = new_large.alloc(layout) {
-                    Ok((mem,Some(new_large)))
+                if let Ok(mem) = new_very_large.alloc(layout) {
+                    Ok((mem,Some(new_very_large)))
                 } else {
-                    // FIXME (unimportant) discards entire `large` chain
+                    // FIXME (unimportant) discards entire `very_large` chain
                     Err(alloc::AllocErr)
                 }
             }
         } else {
             // Extend it without storing metadata...
-            let mut new_large = {
+            let mut new_very_large = {
                 let new_mem = T::get_block().ok_or(alloc::AllocErr)?;
-                let old_large = self.large.take();
-                SizedAllocator::from_memory_chunk(LARGE_CHUNK_SIZE, new_mem, old_large)
+                let old_very_large = self.very_large.take();
+                SizedAllocator::from_memory_chunk(VERY_LARGE_CHUNK_SIZE, new_mem, old_very_large)
             };
-            if let Ok(mem) = new_large.alloc(layout) {
-                Ok((mem,Some(new_large)))
+            if let Ok(mem) = new_very_large.alloc(layout) {
+                Ok((mem,Some(new_very_large)))
             } else {
                 // FIXME (unimportant) discards entire `large` chain
                 Err(alloc::AllocErr)
