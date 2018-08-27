@@ -48,18 +48,20 @@
 //! obtained from `MyAmazingMemorySource` and then managed by the library.
 
 #![no_std]
-
 #![feature(nll)]
 #![feature(alloc)]
 #![feature(allocator_api)]
 #![feature(ptr_offset_from)]
 #![feature(const_fn, const_let)]
 #![feature(cell_update)]
-
-#![warn(missing_docs,
-        missing_debug_implementations,
-        trivial_casts, trivial_numeric_casts,
-        unused_import_braces, unused_qualifications)]
+#![warn(
+    missing_docs,
+    missing_debug_implementations,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications
+)]
 
 extern crate alloc;
 
@@ -69,16 +71,16 @@ extern crate libc;
 #[macro_use]
 mod macros;
 mod bitmapped_stack;
+mod factory_chain;
+pub mod global_allocator;
+pub mod memory_source;
 mod metadata_box;
 mod sized_allocator;
-mod factory_chain;
-pub mod memory_source;
-pub mod global_allocator;
 
 #[cfg(feature = "test_memory_source")]
 mod test_memory_source;
 #[cfg(feature = "test_memory_source")]
 pub use test_memory_source::TestMemorySource;
 
-pub use memory_source::MemorySource;
 pub use global_allocator::Allocator;
+pub use memory_source::MemorySource;

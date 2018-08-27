@@ -2,7 +2,7 @@
 
 use core::ptr;
 
-use memory_source::{MemorySource, BLOCK_SIZE, BLOCK_ALIGN};
+use memory_source::{MemorySource, BLOCK_ALIGN, BLOCK_SIZE};
 
 /// A test memory source that gets memory using `libc::memalign`
 #[derive(Clone, Copy, Debug)]

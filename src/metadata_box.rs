@@ -1,10 +1,9 @@
+use core::ops;
 /// The `SizedAllocator`s are in linked lists of allocators.
 ///
 /// This is the indirection between them.
-
 //use core::marker::PhantomData;
 use core::ptr;
-use core::ops;
 
 // TODO Docs
 #[derive(Debug)]
@@ -17,16 +16,12 @@ impl<T> ops::Deref for MetadataBox<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe {
-            self.ptr.as_ref()
-        }
+        unsafe { self.ptr.as_ref() }
     }
 }
 impl<T> ops::DerefMut for MetadataBox<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe {
-            self.ptr.as_mut()
-        }
+        unsafe { self.ptr.as_mut() }
     }
 }
 

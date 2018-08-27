@@ -68,8 +68,9 @@ pub struct Fallback<T, U> {
 }
 
 unsafe impl<T, U> MemorySource for Fallback<T, U>
-    where T: MemorySource,
-          U: MemorySource
+where
+    T: MemorySource,
+    U: MemorySource,
 {
     unsafe fn get_block() -> Option<NonNull<u8>> {
         T::get_block().or_else(|| U::get_block())

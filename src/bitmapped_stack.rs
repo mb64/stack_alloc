@@ -2,9 +2,9 @@
 //!
 //! This way it can actually de-allocate things.
 
-use alloc::alloc::{self, Layout, AllocErr};
-use core::ptr::NonNull;
+use alloc::alloc::{self, AllocErr, Layout};
 use core::ops;
+use core::ptr::NonNull;
 
 /// The size, in chunks, of each bitmapped stack
 pub const STACK_SIZE: usize = 64;
@@ -159,14 +159,19 @@ impl BitmappedStack {
     }
 
     pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocErr> {
-        debug_log!("Allocing: align %zu, size %zu\n\0", layout.align(), layout.size());
+        debug_log!(
+            "Allocing: align %zu, size %zu\n\0",
+            layout.align(),
+            layout.size()
+        );
         let bottom_of_alloc = {
             let stack_ptr = self.chunk_to_ptr(self.current_height);
-            let aligned_stack_ptr = round_up_to_alignment(stack_ptr.as_ptr() as usize, layout.align());
+            let aligned_stack_ptr =
+                round_up_to_alignment(stack_ptr.as_ptr() as usize, layout.align());
             self.ptr_to_chunk(aligned_stack_ptr as *mut u8)
         };
 
-        if bottom_of_alloc*self.chunk_size + layout.size() > STACK_SIZE*self.chunk_size {
+        if bottom_of_alloc * self.chunk_size + layout.size() > STACK_SIZE * self.chunk_size {
             debug_log!("Exhausted BitmappedStack:\n  chunk_size: %zu\n  current_height: %zu\n  bitmap: %#018zx\n\0",
                 self.chunk_size,
                 self.current_height,
@@ -183,7 +188,11 @@ impl BitmappedStack {
     }
 
     pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        debug_log!("Freeing: align %zu, size %zu\n\0", layout.align(), layout.size());
+        debug_log!(
+            "Freeing: align %zu, size %zu\n\0",
+            layout.align(),
+            layout.size()
+        );
         debug_assert!(self.owns(ptr.as_ptr()));
         let start_chunk = self.ptr_to_chunk(ptr.as_ptr());
         let end_chunk = start_chunk + self.chunks_for(layout.size());
@@ -194,14 +203,19 @@ impl BitmappedStack {
         }
         debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
     }
-    
+
     pub unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) {
-        debug_log!("Shrinking: align %zu, size %zu to %zu\n\0", layout.align(), layout.size(), new_size);
+        debug_log!(
+            "Shrinking: align %zu, size %zu to %zu\n\0",
+            layout.align(),
+            layout.size(),
+            new_size
+        );
         let new_chunks = self.chunks_for(new_size);
         let old_chunks = self.chunks_for(layout.size());
         let new_end = self.ptr_to_chunk(ptr.as_ptr()) + new_chunks;
         let old_end = self.ptr_to_chunk(ptr.as_ptr()) + old_chunks;
-        self.bitmap_deallocate(new_end .. old_end);
+        self.bitmap_deallocate(new_end..old_end);
         if self.current_height == old_end {
             self.current_height = new_end;
             if new_size == 0 {
@@ -211,8 +225,18 @@ impl BitmappedStack {
         debug_log!("    Bitmap is now %#018jx\n\0", self.bitmap);
     }
 
-    pub unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
-        debug_log!("Growing: align %zu, size %zu to %zu\n\0", layout.align(), layout.size(), new_size);
+    pub unsafe fn grow_in_place(
+        &mut self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+        new_size: usize,
+    ) -> Result<(), alloc::CannotReallocInPlace> {
+        debug_log!(
+            "Growing: align %zu, size %zu to %zu\n\0",
+            layout.align(),
+            layout.size(),
+            new_size
+        );
         let new_chunks = self.chunks_for(new_size);
         let old_chunks = self.chunks_for(layout.size());
         let new_end = self.ptr_to_chunk(ptr.as_ptr()) + new_chunks;

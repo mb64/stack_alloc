@@ -59,16 +59,12 @@ impl<'a, T: MemorySource + 'a> ops::Deref for Lock<'a, T> {
     type Target = FactoryChain<T>;
 
     fn deref(&self) -> &FactoryChain<T> {
-        unsafe {
-            & *self.0.alloc.get()
-        }
+        unsafe { &*self.0.alloc.get() }
     }
 }
 impl<'a, T: MemorySource + 'a> ops::DerefMut for Lock<'a, T> {
     fn deref_mut(&mut self) -> &mut FactoryChain<T> {
-        unsafe {
-            &mut *self.0.alloc.get()
-        }
+        unsafe { &mut *self.0.alloc.get() }
     }
 }
 
@@ -94,7 +90,11 @@ fn to_raw<E>(ptr: Result<ptr::NonNull<u8>, E>) -> *mut u8 {
 
 unsafe impl<T: MemorySource> GlobalAlloc for Allocator<T> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        debug_log!("Allocator: allocating size %zu align %zu\n\0", layout.size(), layout.align());
+        debug_log!(
+            "Allocator: allocating size %zu align %zu\n\0",
+            layout.size(),
+            layout.align()
+        );
         let ptr = if layout.size() == 0 {
             ptr::null_mut()
         } else {
@@ -104,21 +104,37 @@ unsafe impl<T: MemorySource> GlobalAlloc for Allocator<T> {
         ptr
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        debug_log!("Allocator: deallocating size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr);
+        debug_log!(
+            "Allocator: deallocating size %zu align %zu pointer %#zx\n\0",
+            layout.size(),
+            layout.align(),
+            ptr
+        );
         if let Some(nonnull) = ptr::NonNull::new(ptr) {
             self.get_alloc().dealloc(nonnull, layout);
         }
         debug_log!("Allocator: done deallocating pointer %#zx\n\n\0", ptr);
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        debug_log!("Allocator: reallocating size %zu to %zu align %zu pointer %#zx\n\0", layout.size(), new_size, layout.align(), ptr);
+        debug_log!(
+            "Allocator: reallocating size %zu to %zu align %zu pointer %#zx\n\0",
+            layout.size(),
+            new_size,
+            layout.align(),
+            ptr
+        );
         let new_ptr = if let Some(nonnull) = ptr::NonNull::new(ptr) {
             self.get_alloc().realloc(nonnull, layout, new_size)
         } else {
-            self.get_alloc().alloc(Layout::from_size_align_unchecked(new_size, layout.align()))
+            self.get_alloc()
+                .alloc(Layout::from_size_align_unchecked(new_size, layout.align()))
         };
         let new_ptr = to_raw(new_ptr);
-        debug_log!("Allocator: done reallocating pointer %#zx to new pointer %#zx\n\n\0", ptr, new_ptr);
+        debug_log!(
+            "Allocator: done reallocating pointer %#zx to new pointer %#zx\n\n\0",
+            ptr,
+            new_ptr
+        );
         new_ptr
     }
 }

@@ -43,7 +43,11 @@ impl SizedAllocator {
     ///  * The chunk size is a power of 2
     ///  * The memory is a valid pointer with alignment `chunk_size` and size `STACK_SIZE *
     ///  chunk_size`
-    pub unsafe fn from_memory_chunk(chunk_size: usize, memory: NonNull<u8>, backup: Option<MetadataBox<SizedAllocator>>) -> Self {
+    pub unsafe fn from_memory_chunk(
+        chunk_size: usize,
+        memory: NonNull<u8>,
+        backup: Option<MetadataBox<SizedAllocator>>,
+    ) -> Self {
         SizedAllocator {
             primary: BitmappedStack::new(memory, chunk_size),
             backup: backup,
@@ -90,12 +94,16 @@ impl SizedAllocator {
     }
 
     pub unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, alloc::AllocErr> {
-        debug_log!("SizedAllocator: allocing size %zu, align %zu\n\0", layout.size(), layout.align());
+        debug_log!(
+            "SizedAllocator: allocing size %zu, align %zu\n\0",
+            layout.size(),
+            layout.align()
+        );
         if layout.size() > self.chunk_size() * self.largest_space_left {
             debug_log!("  (short-circuiting the list because it's too big)\n\0");
             return Err(alloc::AllocErr);
         }
-        if let memory@Ok(_) = self.primary.alloc(layout) {
+        if let memory @ Ok(_) = self.primary.alloc(layout) {
             self.set_largest_space_left();
             memory
         } else {
@@ -107,7 +115,11 @@ impl SizedAllocator {
     }
 
     pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) -> DeallocResponse {
-        debug_log!("SizedAllocator: deallocing size %zu, align %zu\n\0", layout.size(), layout.align());
+        debug_log!(
+            "SizedAllocator: deallocing size %zu, align %zu\n\0",
+            layout.size(),
+            layout.align()
+        );
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
             self.primary.dealloc(ptr, layout);
@@ -125,12 +137,12 @@ impl SizedAllocator {
                     self.backup = backup.backup.take();
                     self.set_largest_space_left();
                     DeallocResponse::FreeAllocator(backup)
-                },
+                }
                 x => {
                     self.backup = Some(backup);
                     self.set_largest_space_left();
                     x
-                },
+                }
             }
         } else {
             debug_log!("    (Primary does not own it, and there is no backup)\n\0");
@@ -139,7 +151,12 @@ impl SizedAllocator {
     }
 
     pub unsafe fn shrink_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) {
-        debug_log!("SizedAllocator: attempting to shrink size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
+        debug_log!(
+            "SizedAllocator: attempting to shrink size %zu align %zu pointer %#zx\n\0",
+            layout.size(),
+            layout.align(),
+            ptr.as_ptr()
+        );
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
             self.primary.shrink_in_place(ptr, layout, new_size);
@@ -154,15 +171,25 @@ impl SizedAllocator {
         }
     }
 
-    pub unsafe fn grow_in_place(&mut self, ptr: NonNull<u8>, layout: Layout, new_size: usize) -> Result<(), alloc::CannotReallocInPlace> {
-        debug_log!("SizedAllocator: attempting to grow size %zu align %zu pointer %#zx\n\0", layout.size(), layout.align(), ptr.as_ptr());
+    pub unsafe fn grow_in_place(
+        &mut self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+        new_size: usize,
+    ) -> Result<(), alloc::CannotReallocInPlace> {
+        debug_log!(
+            "SizedAllocator: attempting to grow size %zu align %zu pointer %#zx\n\0",
+            layout.size(),
+            layout.align(),
+            ptr.as_ptr()
+        );
         if self.primary.owns(ptr.as_ptr()) {
             debug_log!("    (Primary owns it)\n\0");
             match self.primary.grow_in_place(ptr, layout, new_size) {
                 Ok(()) => {
                     self.set_largest_space_left();
                     Ok(())
-                },
+                }
                 err => err,
             }
         } else if let Some(ref mut backup) = self.backup {
@@ -171,7 +198,7 @@ impl SizedAllocator {
                 Ok(()) => {
                     self.set_largest_space_left();
                     Ok(())
-                },
+                }
                 err => err,
             }
         } else {
