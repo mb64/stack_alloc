@@ -16,7 +16,7 @@
 //! struct MyAmazingMemorySource;
 //!
 //! unsafe impl MemorySource for MyAmazingMemorySource {
-//!     unsafe fn get_block() -> Option<std::ptr::NonNull<u8>> {
+//!     unsafe fn get_block(&self) -> Option<std::ptr::NonNull<u8>> {
 //!         // Get a 4096-aligned 256 KiB chunk of memory ...
 //!         unimplemented!()
 //!     }
@@ -28,18 +28,16 @@
 //! Now, you need to tell the compiler that you want to use this as your allocator:
 //!
 //! ```no_run
-//! #![feature(const_fn)]
-//!
 //! extern crate stack_alloc;
 //! use stack_alloc::Allocator;
 //!
 //! struct MyAmazingMemorySource;
 //! unsafe impl stack_alloc::MemorySource for MyAmazingMemorySource {
-//!    unsafe fn get_block() -> Option<std::ptr::NonNull<u8>> { unimplemented!() }
+//!    unsafe fn get_block(&self) -> Option<std::ptr::NonNull<u8>> { unimplemented!() }
 //! }
 //!
 //! #[global_allocator]
-//! static GLOBAL: Allocator<MyAmazingMemorySource> = Allocator::new();
+//! static GLOBAL: Allocator<MyAmazingMemorySource> = Allocator(MyAmazingMemorySource);
 //! ```
 //!
 //! ## Allocating things
@@ -71,7 +69,7 @@ extern crate libc;
 #[macro_use]
 mod macros;
 mod bitmapped_stack;
-mod factory_chain;
+mod bucketed;
 pub mod global_allocator;
 pub mod memory_source;
 mod metadata_box;

@@ -16,7 +16,6 @@
 //! type MyReliableMemorySource = Fallback<MyUnreliableMemorySource, TODO>;
 //! ```
 
-use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 /// The size, in bytes, of a returned block
@@ -42,7 +41,7 @@ pub unsafe trait MemorySource {
     ///
     /// If it returns `Some(thing)`, then ownership of the block of memory pointed to by `thing` is
     /// transferred to the caller.
-    unsafe fn get_block() -> Option<NonNull<u8>>;
+    unsafe fn get_block(&self) -> Option<NonNull<u8>>;
 }
 
 /// A memory source that is never successful in returning memory.
@@ -55,7 +54,7 @@ pub unsafe trait MemorySource {
 pub struct NoMemory;
 
 unsafe impl MemorySource for NoMemory {
-    unsafe fn get_block() -> Option<NonNull<u8>> {
+    unsafe fn get_block(&self) -> Option<NonNull<u8>> {
         None
     }
 }
@@ -63,16 +62,14 @@ unsafe impl MemorySource for NoMemory {
 /// `Fallback<T, U>` first tries to get memory from `T`, but gets it from `U` if that is
 /// unsuccessful.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
-pub struct Fallback<T, U> {
-    _data: PhantomData<(T, U)>,
-}
+pub struct Fallback<T, U>(pub T, pub U);
 
 unsafe impl<T, U> MemorySource for Fallback<T, U>
 where
     T: MemorySource,
     U: MemorySource,
 {
-    unsafe fn get_block() -> Option<NonNull<u8>> {
-        T::get_block().or_else(|| U::get_block())
+    unsafe fn get_block(&self) -> Option<NonNull<u8>> {
+        self.0.get_block().or_else(|| self.1.get_block())
     }
 }

@@ -6,7 +6,7 @@ use core::ops;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use factory_chain::FactoryChain;
+use bucketed::{BucketedAllocator, Buckets};
 use memory_source::MemorySource;
 
 /// The `Allocator` type is the way to set up a global allocator.  It implements the
@@ -19,57 +19,48 @@ use memory_source::MemorySource;
 /// docs](https://doc.rust-lang.org/nightly/std/alloc/index.html#the-global_allocator-attribute)
 /// for more information on global allocators.
 #[derive(Debug)]
-pub struct Allocator<T: MemorySource> {
-    alloc: cell::UnsafeCell<FactoryChain<T>>,
+pub struct Allocator<T: MemorySource>(pub T);
+
+/// The real behind-the-scenes allocator.
+/// It has a global lock over everything.
+#[derive(Debug)]
+struct LockedAllocator {
+    alloc: cell::UnsafeCell<Buckets>,
     lock: AtomicBool,
 }
 
-impl<T: MemorySource> Allocator<T> {
-    /// Creates a new `Allocator<T>` that uses the memory source `T`.
-    ///
-    ///```rust
-    ///extern crate stack_alloc;
-    ///use stack_alloc::Allocator;
-    ///
-    ///type MyMemorySource = stack_alloc::memory_source::NoMemory;
-    ///
-    ///let my_allocator: Allocator<MyMemorySource> = Allocator::new();
-    ///```
-    pub const fn new() -> Self {
-        Allocator {
-            alloc: cell::UnsafeCell::new(FactoryChain::new()),
-            lock: AtomicBool::new(false),
-        }
-    }
-}
+static GLOBAL_LOCKED_ALLOCATOR: LockedAllocator = LockedAllocator {
+    alloc: cell::UnsafeCell::new(Buckets::new()),
+    lock: AtomicBool::new(false),
+};
 
-unsafe impl<T: MemorySource> Sync for Allocator<T> {}
+unsafe impl Sync for LockedAllocator {}
 
 #[derive(Debug)]
-struct Lock<'a, T: MemorySource + 'a>(&'a Allocator<T>);
+struct Lock<'a>(&'a LockedAllocator);
 
-impl<'a, T: MemorySource + 'a> Drop for Lock<'a, T> {
+impl<'a> Drop for Lock<'a> {
     fn drop(&mut self) {
         let prev = self.0.lock.swap(false, Ordering::SeqCst);
         debug_assert_eq!(prev, true);
     }
 }
 
-impl<'a, T: MemorySource + 'a> ops::Deref for Lock<'a, T> {
-    type Target = FactoryChain<T>;
+impl<'a> ops::Deref for Lock<'a> {
+    type Target = Buckets;
 
-    fn deref(&self) -> &FactoryChain<T> {
+    fn deref(&self) -> &Buckets {
         unsafe { &*self.0.alloc.get() }
     }
 }
-impl<'a, T: MemorySource + 'a> ops::DerefMut for Lock<'a, T> {
-    fn deref_mut(&mut self) -> &mut FactoryChain<T> {
+impl<'a> ops::DerefMut for Lock<'a> {
+    fn deref_mut(&mut self) -> &mut Buckets {
         unsafe { &mut *self.0.alloc.get() }
     }
 }
 
-impl<T: MemorySource> Allocator<T> {
-    fn get_alloc(&self) -> Lock<T> {
+impl LockedAllocator {
+    fn get_buckets(&self) -> Lock<'_> {
         let mut spinning = false;
         while self.lock.swap(true, Ordering::SeqCst) == true {
             if !spinning {
@@ -78,6 +69,12 @@ impl<T: MemorySource> Allocator<T> {
             }
         }
         Lock(self)
+    }
+}
+
+impl<S: MemorySource> Allocator<S> {
+    fn get_alloc(&self) -> BucketedAllocator<'_, Lock<'_>, S> {
+        BucketedAllocator::new(GLOBAL_LOCKED_ALLOCATOR.get_buckets(), &self.0)
     }
 }
 

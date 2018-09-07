@@ -5,7 +5,7 @@ extern crate stack_alloc;
 use stack_alloc::{Allocator, TestMemorySource};
 
 #[global_allocator]
-static GLOBAL: Allocator<TestMemorySource> = Allocator::new();
+static GLOBAL: Allocator<TestMemorySource> = Allocator(TestMemorySource);
 
 #[test]
 fn vecs() {

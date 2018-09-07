@@ -9,7 +9,7 @@ use memory_source::{MemorySource, BLOCK_ALIGN, BLOCK_SIZE};
 pub struct TestMemorySource;
 
 unsafe impl MemorySource for TestMemorySource {
-    unsafe fn get_block() -> Option<ptr::NonNull<u8>> {
+    unsafe fn get_block(&self) -> Option<ptr::NonNull<u8>> {
         debug_log!("TestMemorySource: getting memory from libc::memalign\n\0");
         let ptr = ::libc::memalign(BLOCK_ALIGN, BLOCK_SIZE);
         ptr::NonNull::new(ptr).map(ptr::NonNull::cast)
